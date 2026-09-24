@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --fc-radius: 14px;
+  --fc-header: 64px;
+}
+
+html, body { height: 100%; }
+body {
+  @apply bg-ink-50 text-ink-900 antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A single focus treatment everywhere, so keyboard users always see where
+   they are. Applied via .fc-focus and to interactive elements by default. */
+@layer base {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-brand-500/60 ring-offset-2 ring-offset-white rounded-[10px];
+  }
+  ::selection { @apply bg-brand-200 text-brand-950; }
+}
+
+@layer components {
+  .fc-focus {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/60
+           focus-visible:ring-offset-2 focus-visible:ring-offset-white;
+  }
+
+  /* ---------- surfaces ---------- */
+  .fc-card { @apply rounded-2xl border border-ink-200 bg-white shadow-card; }
+  .fc-card-hover {
+    @apply transition-[transform,box-shadow,border-color] duration-200
+           hover:-translate-y-0.5 hover:border-ink-300 hover:shadow-pop;
+  }
+  .fc-section { @apply rounded-3xl border border-ink-200 bg-white p-6 shadow-card sm:p-8; }
+
+  /* ---------- buttons ---------- */
+  .fc-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-[background-color,color,box-shadow,transform] duration-150
+           active:scale-[.985] disabled:cursor-not-allowed disabled:opacity-50
+           disabled:active:scale-100 min-h-[44px];
+  }
+  .fc-btn-primary { @apply fc-btn bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-brand; }
+  .fc-btn-secondary { @apply fc-btn border border-ink-300 bg-white text-ink-800 hover:border-ink-400 hover:bg-ink-50; }
+  .fc-btn-ghost { @apply fc-btn text-ink-700 hover:bg-ink-100; }
+  .fc-btn-danger { @apply fc-btn bg-danger-600 text-white hover:bg-danger-700; }
+  .fc-btn-lg { @apply px-6 py-3.5 text-base min-h-[52px] rounded-2xl; }
+
+  /* ---------- chips & pills ---------- */
+  .fc-chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium
+           min-h-[34px] transition-colors;
+  }
+  .fc-chip-on { @apply fc-chip border-brand-500 bg-brand-50 text-brand-800; }
+  .fc-chip-off { @apply fc-chip border-ink-200 bg-white text-ink-700 hover:border-ink-300 hover:bg-ink-50; }
+  .fc-pill { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold; }
+  .fc-pill-brand { @apply fc-pill bg-brand-50 text-brand-800 ring-1 ring-brand-200; }
+  .fc-pill-success { @apply fc-pill bg-success-50 text-success-700 ring-1 ring-success-100; }
+  .fc-pill-warn { @apply fc-pill bg-warn-50 text-warn-700 ring-1 ring-warn-200; }
+  .fc-pill-danger { @apply fc-pill bg-danger-50 text-danger-700 ring-1 ring-danger-200; }
+  .fc-pill-muted { @apply fc-pill bg-ink-100 text-ink-600 ring-1 ring-ink-200; }
+
+  /* ---------- forms ---------- */
+  .fc-label { @apply block text-xs font-semibold uppercase tracking-wide text-ink-500; }
+  .fc-input {
+    @apply w-full rounded-xl border border-ink-300 bg-white px-3.5 py-2.5 text-sm text-ink-900
+           transition-[border-color,box-shadow] placeholder:text-ink-400
+           focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15
+           disabled:bg-ink-50 disabled:text-ink-400 min-h-[44px];
+  }
+  .fc-input-error {
+    @apply border-danger-500 focus:border-danger-500 focus:ring-danger-500/15;
+  }
+  .fc-hint { @apply mt-1.5 text-[11px] leading-relaxed text-ink-500; }
+  .fc-error { @apply mt-1.5 flex items-start gap-1.5 text-[11px] font-medium text-danger-700; }
+
+  /* ---------- headings ---------- */
+  .fc-h1 { @apply text-2xl font-extrabold tracking-tight text-ink-900 sm:text-3xl; }
+  .fc-h2 { @apply text-lg font-bold tracking-tight text-ink-900; }
+  .fc-eyebrow { @apply text-[11px] font-bold uppercase tracking-[0.14em] text-brand-700; }
+  .fc-muted { @apply text-sm text-ink-600; }
+
+  /* ---------- skeletons ---------- */
+  .fc-skeleton {
+    @apply relative overflow-hidden rounded-lg bg-ink-200/60;
+  }
+  .fc-skeleton::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0,
+      rgba(255, 255, 255, .55) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    animation: shimmer 1.7s infinite;
+  }
+
+  .fc-pulse { animation: soft-pulse 1.6s ease-in-out infinite; }
+}
+
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .62; transform: scale(.955); }
+}
+
+/* Respect users who prefer less motion. Skeleton shimmer and every
+   decorative animation stop; nothing depends on motion to be understood. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+  .fc-skeleton::after { display: none; }
+}
+
+.fc-scroll-hide::-webkit-scrollbar { display: none; }
+.fc-scroll-hide { -ms-overflow-style: none; scrollbar-width: none; }
