@@ -1,0 +1,44 @@
+{
+  "name": "flowcare",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "dev": "NODE_OPTIONS=--max-old-space-size=768 next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "build:ci": "NEXT_DIST_DIR=.next-build next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint",
+    "test": "vitest run --no-file-parallelism",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "node scripts/db/migrate.mjs",
+    "db:migrate:dry": "node scripts/db/migrate.mjs --dry",
+    "db:status": "node scripts/db/migrate.mjs --status",
+    "db:backup": "node scripts/db/backup.mjs",
+    "db:seed": "node scripts/db/seed-osm.mjs",
+    "test:live": "FLOWCARE_LIVE_DB=1 vitest run --config vitest.live.config.ts"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "^15.5.26",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "server-only": "^0.0.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@types/ws": "^8.18.1",
+    "autoprefixer": "^10.4.20",
+    "pg": "^8.23.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "ws": "^8.22.0"
+  }
+}
