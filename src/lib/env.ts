@@ -51,6 +51,24 @@ export function isDemoMode(): boolean {
 }
 
 /**
+ * Why demo mode is on, so the UI can say which it is.
+ *
+ * These are not the same situation and must not be described as if they
+ * were. 'unconfigured' means there is no project to talk to. 'forced' means
+ * there is a perfectly good project and this deployment chose to ignore it —
+ * telling that operator "Supabase is not configured" is simply untrue, and
+ * sends them off checking credentials that were never the problem.
+ */
+export type DemoReason = 'forced' | 'unconfigured';
+
+export function demoReason(): DemoReason | null {
+  if (!isDemoMode()) return null;
+  return env.demoModeForced() && env.supabaseUrl() && env.supabaseAnonKey()
+    ? 'forced'
+    : 'unconfigured';
+}
+
+/**
  * True when hospitals on screen are real rows from Supabase. Distinct from
  * full Supabase mode: writes and auth are still local.
  */

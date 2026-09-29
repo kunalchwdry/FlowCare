@@ -25,6 +25,7 @@ const ACCOUNT_NAV = [
 
 interface Config {
   demoMode: boolean;
+  demoReason: 'forced' | 'unconfigured' | null;
   liveReads?: boolean;
   live?: { hospitals: number; bookable: number } | null;
   googleMaps: { serverConfigured: boolean; browserMapKeyPresent: boolean };
@@ -45,9 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col">
-      {config?.liveReads
-        ? <LiveDataBanner config={config} />
-        : config?.demoMode && <DemoBanner config={config} />}
+      {config && <DataSourceNotice config={config} />}
 
       <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
@@ -122,34 +121,105 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Shown when hospitals come from the live Supabase project. It must name what
- * is real AND what is not, in the same breath: the facility record is a real
- * row, an appointment slot is not. Saying only the flattering half would be
- * the dishonest option.
+ * One compact strip for "where did this data come from".
+ *
+ * This used to be five lines of prose across the top of every page. The
+ * disclosure itself is not optional - the app serves locally generated
+ * appointment slots and synthetic reviews, and saying so is the difference
+ * between a demo and a misrepresentation. But the full text does not need to
+ * be shouted on every page load to stay honest.
+ *
+ * So: the caveat that actually affects what a visitor is looking at stays on
+ * the face of it, the rest sits one click away, and dismissing it lasts for
+ * the tab rather than for ever. Nothing here can be configured away.
  */
-function LiveDataBanner({ config }: { config: Config }) {
-  const n = config.live?.hospitals;
-  return (
-    <div className="bg-sky-100 px-4 py-2 text-center text-[12px] font-medium text-sky-950">
-      <strong>Live database.</strong>{' '}
-      {n ? `${n} hospitals` : 'Hospitals'}, services, accessibility notes, arrival packs and
-      support channels are read from the live Supabase project over RLS.{' '}
-      <strong>Appointment slots are generated locally</strong> for the two records the database
-      itself labels <span className="font-mono">[TEST]</span> — the live project has no sessions
-      table — and sign-in uses demo accounts. No FlowCare reviews exist yet, so no ratings are shown.
-      {!config.googleMaps.serverConfigured && ' Google Maps is not configured, so no Google ratings or photos are shown.'}
-      {!config.ai.anyProviderConfigured && ' No AI provider is configured, so the assistant uses FlowCare\'s deterministic parser.'}
-    </div>
-  );
-}
+function DataSourceNotice({ config }: { config: Config }) {
+  const [open, setOpen] = useState(false);
+  const [hidden, setHidden] = useState(false);
 
-function DemoBanner({ config }: { config: Config }) {
+  // sessionStorage, not localStorage: a dismissal should not silently carry
+  // into a later visit by somebody who never saw the notice in the first place.
+  useEffect(() => {
+    try {
+      setHidden(sessionStorage.getItem('fc-data-notice-dismissed') === '1');
+    } catch {
+      /* private mode - just show it */
+    }
+  }, []);
+
+  const live = Boolean(config.liveReads);
+  if (!live && !config.demoMode) return null;
+  if (hidden) return null;
+
+  const n = config.live?.hospitals;
+  const forced = config.demoReason === 'forced';
+
+  const tone = live
+    ? 'bg-sky-50 text-sky-950 border-sky-200'
+    : 'bg-amber-50 text-amber-900 border-amber-200';
+
+  const summary = live
+    ? `Live database${n ? ` · ${n} hospitals` : ''} · appointment slots are generated locally`
+    : 'Demo data · synthetic records, not real hospitals or real patient feedback';
+
+  const detail = live
+    ? [
+        `${n ? `${n} hospitals` : 'Hospitals'}, services, accessibility notes, arrival packs and support channels are read from the live Supabase project over RLS.`,
+        'Appointment slots are generated locally for the two records the database itself labels [TEST] — the live project has no sessions table — and sign-in uses demo accounts.',
+        'No FlowCare reviews exist yet, so no ratings are shown.',
+      ]
+    : [
+        forced
+          ? 'Demo mode is switched on for this deployment (FLOWCARE_DEMO_MODE), so Supabase is bypassed and hospitals, sessions, appointments and reviews are synthetic records generated locally.'
+          : 'Supabase is not configured, so hospitals, sessions, appointments and reviews are synthetic records generated locally.',
+        'They are not real hospitals or real patient feedback.',
+      ];
+
+  if (!config.googleMaps.serverConfigured) {
+    detail.push('Google Maps is not configured, so no Google ratings or photos are shown.');
+  }
+  if (!config.ai.anyProviderConfigured) {
+    detail.push("No AI provider is configured, so the assistant uses FlowCare's deterministic parser.");
+  }
+
   return (
-    <div className="bg-amber-100 px-4 py-2 text-center text-[12px] font-medium text-amber-900">
-      <strong>Demo data.</strong> Supabase is not configured, so hospitals, sessions, appointments and reviews are
-      synthetic records generated locally — they are not real hospitals or real patient feedback.
-      {!config.googleMaps.serverConfigured && ' Google Maps is not configured, so no Google ratings or photos are shown.'}
-      {!config.ai.anyProviderConfigured && ' No AI provider is configured, so the assistant uses FlowCare\'s deterministic parser.'}
+    <div className={`border-b px-4 text-[12px] ${tone}`}>
+      <div className="mx-auto flex max-w-7xl items-center gap-2 py-1.5">
+        <span className="truncate font-medium">{summary}</span>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="fc-data-notice-detail"
+          className="shrink-0 rounded px-1.5 py-0.5 font-semibold underline underline-offset-2 hover:opacity-70"
+        >
+          {open ? 'Less' : 'Details'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setHidden(true);
+            try {
+              sessionStorage.setItem('fc-data-notice-dismissed', '1');
+            } catch {
+              /* nothing to persist to */
+            }
+          }}
+          aria-label="Dismiss the data source notice for this session"
+          className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-sm leading-none hover:opacity-70"
+        >
+          ×
+        </button>
+      </div>
+      {open && (
+        <div id="fc-data-notice-detail" className="mx-auto max-w-7xl pb-2">
+          <ul className="list-disc space-y-1 pl-5">
+            {detail.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
