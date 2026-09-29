@@ -18,7 +18,9 @@ from pptx.dml.color import RGBColor
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Pt
 
-DECK = "/home/user/deck"
+# Paths are resolved from this file so the deck tree can be moved or
+# cloned somewhere else without editing the script.
+DECK = os.path.dirname(os.path.abspath(__file__))
 SRC = f"{DECK}/FlowCare-CuriousParc-2026.pptx"
 OUT = f"{DECK}/FlowCare-CuriousParc-2026.pptx"
 SHOTS = f"{DECK}/screens"
@@ -63,7 +65,7 @@ def make_transparent_mark(src, dst):
 
 
 MARK = f"{BUILD}/mark.png"
-MW, MH = make_transparent_mark("/home/user/flowcare/public/brand/logo-source.png", MARK)
+MW, MH = make_transparent_mark(os.path.join(DECK, "..", "public", "brand", "logo-source.png"), MARK)
 ASPECT = MH / MW
 print(f"mark trimmed to {MW}x{MH}  (h = w * {ASPECT:.4f})")
 
