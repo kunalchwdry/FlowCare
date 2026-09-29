@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={href}
                 href={href}
-                className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                className={`flex items-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
                   active(href) ? 'bg-brand-50 text-brand-700' : 'text-ink-600 hover:bg-ink-100'
                 }`}
               >
@@ -74,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Link
                 key={l.href}
                 href={l.href}
-                className="hidden lg:inline-flex rounded-lg px-2.5 py-2 text-xs font-semibold text-ink-600 hover:bg-ink-50"
+                className="hidden lg:inline-flex whitespace-nowrap rounded-lg px-2.5 py-2 text-xs font-semibold text-ink-600 hover:bg-ink-50"
               >
                 {l.label}
               </Link>
