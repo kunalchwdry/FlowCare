@@ -229,13 +229,16 @@ function buildSessions(hospitals: Hospital[]): ClinicSession[] {
         const booked = h.id === 'katraj-trust-charitable'
           ? capacity
           : Math.min(capacity, Math.round(capacity * (fullBias * (0.6 + r() * 0.6))));
+        // Draw the sitting as a pair. Rolling start and end independently
+        // produced impossible sessions like 16:00-13:00 a quarter of the time.
+        const morningSitting = r() < 0.5;
         out.push({
           id: `${dept.id}:${dateOnly(d)}`,
           hospitalId: h.id,
           departmentId: dept.id,
           date: dateOnly(d),
-          startTime: r() < 0.5 ? '09:30' : '16:00',
-          endTime: r() < 0.5 ? '13:00' : '20:00',
+          startTime: morningSitting ? '09:30' : '16:00',
+          endTime: morningSitting ? '13:00' : '20:00',
           capacity,
           booked,
           status: booked >= capacity ? 'full' : 'open',
