@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { isDemoMode, liveReadMode, googleMapsConfigured } from '@/lib/env';
+import { isDemoMode, demoReason, liveReadMode, googleMapsConfigured } from '@/lib/env';
 import { anyProviderConfigured } from '@/lib/ai/providers';
 import { DEMO_COOKIE } from '@/lib/auth/session';
 
@@ -34,6 +34,7 @@ export async function GET() {
     ok: true,
     data: {
       demoMode: isDemoMode(),
+      demoReason: demoReason(),
       liveReads: liveReadMode(),
       live,
       demoAccount,
