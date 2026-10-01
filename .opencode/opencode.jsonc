@@ -1,0 +1,19 @@
+{
+  "provider": {
+    "pollinations": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GLM 5.3 Flash",
+      "options": {
+        "baseURL": "https://gen.pollinations.ai/v1",
+        "apiKey": "{env:CUSTOM_POLLINATIONS_API_KEY}"
+      },
+      "models": {
+        "community/scriptsnsenses-sys/glm-5.3-flash-free": {
+          "id": "community/scriptsnsenses-sys/glm-5.3-flash-free",
+          "name": "GLM 5.3 Flash",
+          "family": "pollinations"
+        }
+      }
+    }
+  }
+}
