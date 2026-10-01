@@ -247,11 +247,68 @@ export interface Appointment {
    * for a slot, and the hospital has not accepted it yet. Nothing in the UI
    * may present a request as a confirmed appointment.
    */
-  status: 'requested' | 'booked' | 'checked_in' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
+  status:
+    | 'requested'
+    | 'booked'
+    | 'reschedule_proposed'
+    | 'checked_in'
+    | 'in_progress'
+    | 'completed'
+    | 'cancelled'
+    | 'rejected'
+    | 'no_show';
   completedAt: string | null;
   /** Patient's own words. Administrative only — never a clinical field. */
   reason?: string | null;
   requestedAt?: string | null;
+
+  /** Bumped on every transition. The basis of optimistic concurrency. */
+  version?: number;
+  /** When the hospital accepted. Null while the request is still pending. */
+  confirmedAt?: string | null;
+  /**
+   * Why the hospital declined, cancelled, or proposed a different time.
+   * Shown to the patient verbatim, so it is written for them, not for staff.
+   */
+  decisionReason?: string | null;
+  /** Session the hospital is proposing instead, while reschedule is pending. */
+  proposedSessionId?: string | null;
+  proposedFor?: string | null;
+}
+
+/**
+ * One entry in an appointment's audit trail.
+ *
+ * Generated from transitions rather than written by hand, so the timeline a
+ * patient sees and the record staff rely on in a dispute are the same rows.
+ */
+export interface AppointmentEvent {
+  id: string;
+  appointmentId: string;
+  /** The action name from the state machine, e.g. 'accept'. */
+  action: string;
+  fromStatus: string | null;
+  toStatus: string;
+  actorSide: 'patient' | 'hospital' | 'system';
+  /** Role only — never a staff member's name, to the patient. */
+  actorRole: string;
+  actorId: string | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+/** In-app notification. Delivery is in-app only unless a provider is configured. */
+export interface Notification {
+  id: string;
+  /** Recipient. For hospital-side notices this is the hospital id. */
+  audience: 'patient' | 'hospital';
+  recipientId: string;
+  kind: string;
+  title: string;
+  body: string;
+  appointmentId: string | null;
+  readAt: string | null;
+  createdAt: string;
 }
 
 export interface ClinicSession {

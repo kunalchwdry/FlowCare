@@ -4,6 +4,8 @@ import type {
   HospitalReview, LanguageSupport, ModerationEvent, PrepRequirement,
   QueueSnapshot, ReviewReport, SchemeListing, ServiceVerification, VisitRecord,
   WayfindingRoute,
+  AppointmentEvent,
+  Notification,
 } from '@/lib/types';
 
 /** Storage-agnostic contract. Implemented by demoRepo and supabaseRepo. */
@@ -18,6 +20,19 @@ export interface Repo {
   getAppointment(id: string): Promise<Appointment | null>;
   /** Creates a slot REQUEST. Never returns a confirmed booking. */
   requestAppointment(input: NewAppointmentRequest): Promise<Appointment>;
+
+  /**
+   * The only way an appointment's status may change.
+   *
+   * Validation lives in lib/appointments/stateMachine; this just applies the
+   * plan it returns and writes the matching event. No caller anywhere may
+   * assign `status` directly.
+   */
+  transitionAppointment(input: TransitionInput): Promise<Appointment>;
+  listAppointmentEvents(appointmentId: string): Promise<AppointmentEvent[]>;
+
+  listNotifications(audience: 'patient' | 'hospital', recipientId: string): Promise<Notification[]>;
+  markNotificationsRead(audience: 'patient' | 'hospital', recipientId: string): Promise<void>;
 
   createReview(input: NewReview): Promise<HospitalReview>;
   getReview(id: string): Promise<HospitalReview | null>;
@@ -155,6 +170,22 @@ export interface NewReport {
   reporterId: string;
   reason: string;
   detail: string | null;
+}
+
+export interface TransitionInput {
+  appointmentId: string;
+  action: string;
+  actor: 'patient' | 'hospital';
+  actorId: string;
+  actorRole: string;
+  /** Hospital permissions held by the caller. Empty for patients. */
+  permissions?: readonly string[];
+  /** Caller's view of the row; a mismatch is a VERSION_CONFLICT. */
+  expectedVersion?: number;
+  reason?: string | null;
+  proposedSessionId?: string | null;
+  /** Scopes the write. A mismatch must surface as NOT_FOUND, never 403. */
+  hospitalId?: string | null;
 }
 
 export interface AuditEvent {

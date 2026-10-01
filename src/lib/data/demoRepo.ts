@@ -12,13 +12,15 @@ import { FACTS } from './facts';
 import type {
   AuditEvent, CorrectionReview, FacilityFacts, NewCareContext, NewCorrection,
   NewAppointmentRequest, NewFollowUpTask, NewReport, NewReview, NewVisitRecord, Repo,
+  TransitionInput,
 } from './repo';
+import { plan, TransitionError } from '@/lib/appointments/stateMachine';
 import { assertAdministrative } from '@/lib/journey/prep';
 import type {
   AccessibilityComponent, Appointment, CareContext, ClinicSession,
   FacilityCorrection, Favorite, FollowUpTask, Hospital, HospitalReview,
   ModerationEvent, QueueSnapshot, ReviewReport, SchemeListing,
-  ServiceVerification, VisitRecord,
+  ServiceVerification, VisitRecord, AppointmentEvent, Notification,
 } from '@/lib/types';
 
 interface MutableState {
@@ -34,6 +36,9 @@ interface MutableState {
   visitRecords: VisitRecord[];
   followUpTasks: FollowUpTask[];
   corrections: FacilityCorrection[];
+  /** Audit trail for appointment transitions. Append-only. */
+  appointmentEvents: AppointmentEvent[];
+  notifications: Notification[];
 }
 
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -43,10 +48,67 @@ function emptyState(): MutableState {
   return {
     appointments: [], favorites: [], reviews: [...SEED.reviews], reports: [], moderationEvents: [], audit: [],
     careContexts: [], visitRecords: [], followUpTasks: [], corrections: [],
+      appointmentEvents: [], notifications: [],
   };
 }
 
 let state: MutableState | null = null;
+
+/**
+ * Raise in-app notices for a transition.
+ *
+ * In-app only, deliberately. No email or SMS provider is configured, and
+ * writing "we have emailed you" when nothing was sent is the kind of claim
+ * this codebase does not make. Both sides are notified so the patient and
+ * the hospital see the same event from their own point of view.
+ */
+function notify(
+  s: MutableState,
+  apt: Appointment,
+  action: string,
+  to: string,
+  reason: string | null,
+): void {
+  const now = new Date().toISOString();
+  const hospital = SEED.hospitals.find((h) => h.id === apt.hospitalId);
+  const name = hospital?.name ?? 'The hospital';
+
+  const forPatient: Record<string, { title: string; body: string }> = {
+    accept: { title: 'Appointment confirmed', body: `${name} confirmed your appointment.` },
+    reject: { title: 'Request declined', body: reason ? `${name} declined your request: ${reason}` : `${name} declined your request.` },
+    propose_reschedule: { title: 'A different time was proposed', body: `${name} has proposed another time. Accept or decline it on your visits page.` },
+    cancel: { title: 'Appointment cancelled', body: reason ? `${name} cancelled this appointment: ${reason}` : 'This appointment was cancelled.' },
+    check_in: { title: 'Checked in', body: `You are checked in at ${name}.` },
+    start: { title: 'Your consultation has started', body: `${name} has called you through.` },
+    complete: { title: 'Visit completed', body: `Your visit to ${name} is complete. You can now leave a review.` },
+    no_show: { title: 'Marked as not attended', body: `${name} recorded this appointment as not attended.` },
+  };
+
+  const p = forPatient[action];
+  if (p) {
+    s.notifications.push({
+      id: uid('ntf'), audience: 'patient', recipientId: apt.patientId,
+      kind: action, title: p.title, body: p.body,
+      appointmentId: apt.id, readAt: null, createdAt: now,
+    });
+  }
+
+  // The hospital side only needs telling about things the patient initiated.
+  const forHospital: Record<string, { title: string; body: string }> = {
+    accept_reschedule: { title: 'Patient accepted the new time', body: 'A proposed time was accepted.' },
+    decline_reschedule: { title: 'Patient declined the new time', body: 'A proposed time was declined and the appointment is cancelled.' },
+    cancel: { title: 'Appointment cancelled', body: reason ? `Cancelled: ${reason}` : 'An appointment was cancelled.' },
+  };
+  const h = forHospital[action];
+  if (h) {
+    s.notifications.push({
+      id: uid('ntf'), audience: 'hospital', recipientId: apt.hospitalId,
+      kind: action, title: h.title, body: h.body,
+      appointmentId: apt.id, readAt: null, createdAt: now,
+    });
+  }
+  void to;
+}
 
 function load(): MutableState {
   if (state) return state;
@@ -159,6 +221,117 @@ export const demoRepo: Repo = {
     s.appointments.push(appointment);
     save();
     return appointment;
+  },
+
+  /**
+   * Apply a validated transition.
+   *
+   * The seeded appointments are immutable fixtures, so a transition against
+   * one is materialised into mutable state first. Everything else — who may
+   * act, from which status, whether a reason is required — is decided by
+   * stateMachine.plan(), never here.
+   */
+  async transitionAppointment(input: TransitionInput): Promise<Appointment> {
+    const s = load();
+    const seeded = SEED.appointments.find((a) => a.id === input.appointmentId);
+    let row = s.appointments.find((a) => a.id === input.appointmentId);
+
+    if (!row && seeded) {
+      row = { ...seeded, version: seeded.version ?? 1 };
+      s.appointments.push(row);
+    }
+    if (!row) throw new Error('NOT_FOUND');
+
+    // Scope check before anything else. A staff member naming another
+    // hospital's appointment id gets NOT_FOUND, not FORBIDDEN: a 403 would
+    // confirm the row exists and turn this into an enumeration oracle.
+    if (input.hospitalId && row.hospitalId !== input.hospitalId) throw new Error('NOT_FOUND');
+    if (input.actor === 'patient' && row.patientId !== input.actorId) throw new Error('NOT_FOUND');
+
+    const current = row.version ?? 1;
+    const decided = plan({
+      action: input.action,
+      actor: input.actor,
+      permissions: input.permissions ?? [],
+      current: row.status,
+      expectedVersion: input.expectedVersion,
+      actualVersion: current,
+      reason: input.reason ?? null,
+      proposedSlotId: input.proposedSessionId ?? null,
+    });
+
+    const now = new Date().toISOString();
+
+    // Accepting a proposed time moves the booking onto that session, so the
+    // seat has to be available there too. Checked here rather than in the
+    // state machine because capacity is data, not policy.
+    if (decided.consumesCapacity && row.proposedSessionId) {
+      const target = SEED.sessions.find((x) => x.id === row!.proposedSessionId);
+      if (!target) throw new Error('NOT_FOUND');
+      const taken = s.appointments.filter(
+        (a) => a.sessionId === target.id && !['cancelled', 'rejected', 'no_show'].includes(a.status),
+      ).length;
+      if (target.booked + taken >= target.capacity) throw new Error('CAPACITY_FULL');
+      row.sessionId = target.id;
+      row.scheduledFor = `${target.date}T${target.startTime}:00`;
+      row.departmentId = target.departmentId;
+    }
+
+    if (decided.action === 'propose_reschedule') {
+      const target = SEED.sessions.find((x) => x.id === decided.proposedSlotId);
+      if (!target) throw new Error('NOT_FOUND');
+      row.proposedSessionId = target.id;
+      row.proposedFor = `${target.date}T${target.startTime}:00`;
+    } else {
+      row.proposedSessionId = null;
+      row.proposedFor = null;
+    }
+
+    const from = row.status;
+    row.status = decided.to;
+    row.version = current + 1;
+    if (decided.to === 'booked') row.confirmedAt = now;
+    if (decided.to === 'completed') row.completedAt = now;
+    if (decided.reason) row.decisionReason = decided.reason;
+
+    s.appointmentEvents.push({
+      id: uid('evt'),
+      appointmentId: row.id,
+      action: decided.action,
+      fromStatus: from,
+      toStatus: decided.to,
+      actorSide: input.actor,
+      actorRole: input.actorRole,
+      actorId: input.actorId,
+      reason: decided.reason,
+      createdAt: now,
+    });
+
+    notify(s, row, decided.action, decided.to, decided.reason);
+    save();
+    return { ...row };
+  },
+
+  async listAppointmentEvents(appointmentId: string): Promise<AppointmentEvent[]> {
+    return load()
+      .appointmentEvents.filter((e) => e.appointmentId === appointmentId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
+  async listNotifications(audience, recipientId): Promise<Notification[]> {
+    return load()
+      .notifications.filter((n) => n.audience === audience && n.recipientId === recipientId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 50);
+  },
+
+  async markNotificationsRead(audience, recipientId): Promise<void> {
+    const s = load();
+    const now = new Date().toISOString();
+    for (const n of s.notifications) {
+      if (n.audience === audience && n.recipientId === recipientId && !n.readAt) n.readAt = now;
+    }
+    save();
   },
 
   async createReview(input: NewReview) {
