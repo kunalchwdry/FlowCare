@@ -7,6 +7,7 @@ interface ProviderInfo {
   label: string;
   note: string;
   defaultModel: string;
+  models: string[];
   serverKeyPresent: boolean;
 }
 
@@ -32,6 +33,12 @@ export function ApiKeySettings() {
   const [provider, setProvider] = useState('gemini');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [custom, setCustom] = useState(false);
+
+  // The provider owns the model list, so a model chosen for one provider
+  // must not survive a switch to another — a Groq id sent to Gemini fails
+  // in a way that looks like a bad key.
+  const current = providers.find((p) => p.id === provider);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -167,7 +174,11 @@ export function ApiKeySettings() {
             <span className="text-sm font-medium text-ink-700">Provider</span>
             <select
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
+              onChange={(e) => {
+                setProvider(e.target.value);
+                setModel('');
+                setCustom(false);
+              }}
               className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm"
             >
               {providers.map((p) => (
@@ -177,37 +188,69 @@ export function ApiKeySettings() {
               ))}
             </select>
             <span className="mt-1 block text-xs text-ink-500">
-              {providers.find((p) => p.id === provider)?.note}
+              {current?.note}
             </span>
           </label>
 
           <label className="block">
             <span className="text-sm font-medium text-ink-700">Model (optional)</span>
-            <input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder={providers.find((p) => p.id === provider)?.defaultModel ?? ''}
-              className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm"
-              maxLength={80}
-              /*
-               * Chrome guesses at unlabelled single-line inputs near a
-               * password field and had been autofilling an email address in
-               * here, which then got saved as the model name. name + id give
-               * it something unambiguous and autoComplete="off" tells it not
-               * to guess. spellCheck off because model ids are not prose.
-               */
-              name="ai-model-id"
-              id="ai-model-id"
-              autoComplete="off"
-              spellCheck={false}
-              aria-describedby="ai-model-hint"
-            />
+            {/*
+              * A select, not a text box. This was free text, and a single
+              * mistyped id is accepted at save time then fails on every
+              * call with the provider's own error — which reads like a bad
+              * key rather than a typo. The list comes from the server so it
+              * stays in step with the adapters, and "Custom" is kept for
+              * models that are not listed, since providers churn constantly.
+              */}
+            {custom ? (
+              <input
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={current?.defaultModel ?? ''}
+                className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 font-mono text-sm"
+                maxLength={80}
+                name="ai-model-id"
+                id="ai-model-id"
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="ai-model-hint"
+              />
+            ) : (
+              <select
+                value={model}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') { setCustom(true); setModel(''); return; }
+                  setModel(e.target.value);
+                }}
+                className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm"
+                aria-describedby="ai-model-hint"
+              >
+                <option value="">
+                  Default — {current?.defaultModel ?? 'provider default'}
+                </option>
+                {(current?.models ?? [])
+                  .filter((m) => m !== current?.defaultModel)
+                  .map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                <option value="__custom__">Custom…</option>
+              </select>
+            )}
             <span id="ai-model-hint" className="mt-1 block text-xs text-ink-500">
-              Leave blank to use{' '}
-              <span className="font-mono">
-                {providers.find((p) => p.id === provider)?.defaultModel ?? 'the provider default'}
-              </span>
-              . This is a model name, not an email or account.
+              {custom ? (
+                <>
+                  Type an exact model id for {current?.label ?? 'this provider'}.{' '}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2"
+                    onClick={() => { setCustom(false); setModel(''); }}
+                  >
+                    Back to the list
+                  </button>
+                </>
+              ) : (
+                <>Leave on default unless you need a specific model.</>
+              )}
             </span>
           </label>
         </div>
