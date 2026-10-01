@@ -22,19 +22,53 @@ export { STAFF_ROLES, STAFF_ROLE_LABELS } from '@/lib/staff/roles';
 
 const FILE = path.join(process.cwd(), '.data', 'staff-requests.json');
 
+/**
+ * Requests submitted while the filesystem is unwritable.
+ *
+ * Serverless hosts mount a read-only filesystem apart from an ephemeral
+ * /tmp, so the write below throws and used to surface as a 500 — the
+ * submitter was told "Something went wrong" for an operation that had in
+ * fact been accepted and validated. Holding the row in module scope keeps it
+ * readable for the life of the instance, which is enough for an
+ * administrator to see and act on it in the same session.
+ *
+ * This is a fallback, not a store: it does not survive a cold start, and
+ * `storageIsDurable()` reports that honestly so callers can say so rather
+ * than implying the request is safely filed.
+ */
+let volatileRows: StaffAccessRequest[] = [];
+let filesystemWritable: boolean | null = null;
+
+export function storageIsDurable(): boolean {
+  return filesystemWritable !== false;
+}
+
 async function readAll(): Promise<StaffAccessRequest[]> {
   try {
     const raw = await fs.readFile(FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as StaffAccessRequest[]) : [];
+    const onDisk = Array.isArray(parsed) ? (parsed as StaffAccessRequest[]) : [];
+    // Merge so a request accepted after the filesystem went read-only is not
+    // hidden by an older on-disk snapshot.
+    const seen = new Set(onDisk.map((r) => r.id));
+    return [...onDisk, ...volatileRows.filter((r) => !seen.has(r.id))];
   } catch {
-    return [];
+    return [...volatileRows];
   }
 }
 
 async function writeAll(rows: StaffAccessRequest[]): Promise<void> {
-  await fs.mkdir(path.dirname(FILE), { recursive: true });
-  await fs.writeFile(FILE, JSON.stringify(rows, null, 2), 'utf8');
+  try {
+    await fs.mkdir(path.dirname(FILE), { recursive: true });
+    await fs.writeFile(FILE, JSON.stringify(rows, null, 2), 'utf8');
+    filesystemWritable = true;
+  } catch {
+    // EROFS / EACCES on a serverless host. Keep the data for this instance
+    // rather than throwing: the caller has already validated and authorised
+    // the change, and a 500 here would lose it silently either way.
+    filesystemWritable = false;
+    volatileRows = rows;
+  }
 }
 
 export async function listRequests(filter?: { hospitalId?: string; status?: RequestStatus }) {

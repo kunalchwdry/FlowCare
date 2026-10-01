@@ -46,21 +46,27 @@ export function MapView({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY;
   const browserKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
-  const [mode, setMode] = useState<'loading' | 'google' | 'schematic'>(browserKey ? 'loading' : 'schematic');
+  // MapTiler first: it is the configured provider here and needs no Google
+  // billing account. Google stays supported for deployments that have one,
+  // and the schematic remains the floor so the page is never blank.
+  const initialMode = maptilerKey ? 'maptiler' : browserKey ? 'loading' : 'schematic';
+  const [mode, setMode] = useState<'loading' | 'google' | 'maptiler' | 'schematic'>(initialMode);
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
   useEffect(() => {
+    if (maptilerKey) return;            // handled by the MapLibre effect below
     if (!browserKey) { setMode('schematic'); return; }
     let cancelled = false;
     loadGoogleMaps(browserKey, mapId)
       .then(() => { if (!cancelled) setMode('google'); })
       .catch(() => { if (!cancelled) setMode('schematic'); });
     return () => { cancelled = true; };
-  }, [browserKey, mapId]);
+  }, [browserKey, mapId, maptilerKey]);
 
   useEffect(() => {
     if (mode !== 'google' || !ref.current || !window.google?.maps) return;
@@ -93,6 +99,79 @@ export function MapView({
     if (origin) bounds.extend(origin);
     if (results.length) mapRef.current.fitBounds(bounds, 48);
   }, [mode, results, origin, mapId, onSelect]);
+
+  /**
+   * MapTiler via MapLibre GL.
+   *
+   * Loaded with a dynamic import so neither the library nor its stylesheet
+   * reaches a bundle that never renders a map — it is a sizeable dependency
+   * and discovery works perfectly well without it.
+   *
+   * The key is a browser key and is visible in network requests by design,
+   * exactly like a Google browser key; the protection is the domain
+   * restriction set on it in the MapTiler dashboard, not secrecy. If the
+   * style fails to load for any reason the schematic takes over, so a
+   * revoked or rate-limited key degrades instead of leaving a blank panel.
+   */
+  useEffect(() => {
+    if (mode !== 'maptiler' || !ref.current || !maptilerKey) return;
+    let cancelled = false;
+    let map: any = null;
+
+    (async () => {
+      const maplibre = await import('maplibre-gl');
+      // @ts-expect-error -- stylesheet side-effect import, no type declaration
+      await import('maplibre-gl/dist/maplibre-gl.css');
+      if (cancelled || !ref.current) return;
+
+      const centre = origin ?? results[0]?.hospital.location ?? { lat: 18.5204, lng: 73.8567 };
+      map = new maplibre.Map({
+        container: ref.current,
+        style: `https://api.maptiler.com/maps/streets-v2/style.json?key=${maptilerKey}`,
+        center: [centre.lng, centre.lat],
+        zoom: 11,
+        attributionControl: { compact: true },
+      });
+      map.addControl(new maplibre.NavigationControl({ showCompass: false }), 'top-right');
+      map.on('error', () => { if (!cancelled) setMode('schematic'); });
+      mapRef.current = map;
+
+      map.on('load', () => {
+        if (cancelled) return;
+        const bounds = new maplibre.LngLatBounds();
+        for (const r of results) {
+          const { lat, lng } = r.hospital.location;
+          const el = document.createElement('button');
+          el.type = 'button';
+          el.setAttribute('aria-label', r.hospital.name);
+          const active = r.hospital.id === selectedId;
+          el.style.cssText = [
+            'width:16px', 'height:16px', 'border-radius:9999px', 'cursor:pointer',
+            `background:${active ? '#1a7a79' : '#3dbbb9'}`,
+            'border:2px solid #fff', 'box-shadow:0 1px 4px rgba(0,0,0,.35)',
+          ].join(';');
+          el.addEventListener('click', (e) => { e.stopPropagation(); onSelect(r.hospital.id); });
+          new maplibre.Marker({ element: el }).setLngLat([lng, lat])
+            .setPopup(new maplibre.Popup({ offset: 14, closeButton: false })
+              .setText(r.hospital.name))
+            .addTo(map);
+          bounds.extend([lng, lat]);
+        }
+        if (origin) bounds.extend([origin.lng, origin.lat]);
+        if (results.length) map.fitBounds(bounds, { padding: 56, maxZoom: 14, duration: 0 });
+      });
+    })().catch(() => { if (!cancelled) setMode('schematic'); });
+
+    return () => { cancelled = true; if (map) { map.remove(); mapRef.current = null; } };
+  }, [mode, maptilerKey, results, origin, selectedId, onSelect]);
+
+  if (mode === 'maptiler') {
+    return (
+      <div className="relative h-full w-full">
+        <div ref={ref} className="h-full w-full" />
+      </div>
+    );
+  }
 
   if (mode === 'google') {
     return (

@@ -21,6 +21,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
+    "maplibre-gl": "^6.11.2",
     "next": "^15.5.26",
     "react": "19.0.0",
     "react-dom": "19.0.0",
