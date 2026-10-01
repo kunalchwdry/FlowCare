@@ -1,0 +1,21 @@
+kortix_version: 2
+project:
+  name: FlowCare
+  description: ""
+env:
+  required: []
+  optional: []
+default_agent: kortix
+agents:
+  kortix:
+    connectors: all
+    secrets: all
+    kortix_permissions: all
+    skills: all
+    repository_access: true
+connectors:
+  - slug: gmail-wotaaq
+    provider: composio
+    name: Gmail
+    app: gmail
+    account: default
