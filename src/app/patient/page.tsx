@@ -12,10 +12,14 @@ import type { Appointment, Hospital } from '@/lib/types';
 export const metadata: Metadata = { title: 'Your dashboard — FlowCare' };
 export const dynamic = 'force-dynamic';
 
-const ACTIVE: Appointment['status'][] = ['requested', 'booked', 'checked_in', 'in_progress'];
+const ACTIVE: Appointment['status'][] = [
+  'requested', 'booked', 'reschedule_proposed', 'checked_in', 'in_progress',
+];
 
 const STATUS_STYLE: Record<Appointment['status'], { label: string; cls: string }> = {
   requested: { label: 'Requested', cls: 'fc-pill-warn' },
+  reschedule_proposed: { label: 'New time proposed', cls: 'fc-pill-warn' },
+  rejected: { label: 'Declined', cls: 'fc-pill-muted' },
   booked: { label: 'Confirmed', cls: 'fc-pill-brand' },
   checked_in: { label: 'Checked in', cls: 'fc-pill-brand' },
   in_progress: { label: 'In consultation', cls: 'fc-pill-success' },

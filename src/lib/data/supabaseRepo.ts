@@ -162,6 +162,34 @@ export function createSupabaseRepo(
   return {
     kind: 'supabase',
 
+    /**
+     * Not wired yet.
+     *
+     * The live project already has `transition_appointment` as a SECURITY
+     * DEFINER RPC, but its accepted action vocabulary has not been read back
+     * from the database, and guessing it would mean silently writing the
+     * wrong status. Throwing here is deliberate: the portal must not appear
+     * to work on a path that has never been verified.
+     *
+     * getRepo() returns liveRepo whenever FLOWCARE_LIVE_READS is set, which
+     * is the configuration in production, so this path is not currently
+     * reached. See docs/hospital-portal.md for what mapping it to the RPC
+     * requires.
+     */
+    async transitionAppointment() {
+      throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
+    },
+    async listAppointmentEvents() {
+      throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
+    },
+    async listNotifications() {
+      return [];
+    },
+    async markNotificationsRead() {
+      /* no notifications table in the live project yet — migration 0009 */
+    },
+
+
     async listHospitals() {
       const res = await client.from('hospitals').select(HOSPITAL_SELECT).eq('active', true);
       return must<Row[]>(res).map(mapHospital);
