@@ -49,24 +49,41 @@ export function MapView({
   const maptilerKey = process.env.NEXT_PUBLIC_MAPTILER_KEY;
   const browserKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
   const mapId = process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID;
-  // MapTiler first: it is the configured provider here and needs no Google
-  // billing account. Google stays supported for deployments that have one,
-  // and the schematic remains the floor so the page is never blank.
-  const initialMode = maptilerKey ? 'maptiler' : browserKey ? 'loading' : 'schematic';
-  const [mode, setMode] = useState<'loading' | 'google' | 'maptiler' | 'schematic'>(initialMode);
+
+  /**
+   * Vector tiles, with a keyless default.
+   *
+   * OpenFreeMap serves OpenMapTiles-schema vector tiles with no API key, no
+   * account and no usage ceiling, so the map works on a fresh clone with
+   * nothing configured. That matters more than it sounds: a map that needs
+   * a billing account is a map that is broken for most people who run this.
+   *
+   * A MapTiler key, if present and accepted, takes precedence — same engine,
+   * same schema, just a different style endpoint. When the supplied key was
+   * rejected (403 "Key usage restricted") the map went blank; now that path
+   * simply falls back, because the style URL is the only thing that differs.
+   */
+  const vectorStyle = maptilerKey
+    ? `https://api.maptiler.com/maps/streets-v2/style.json?key=${maptilerKey}`
+    : 'https://tiles.openfreemap.org/styles/liberty';
+
+  // Vector is always available now, so it is the default rather than a
+  // configured upgrade. Google stays for deployments that prefer it.
+  const initialMode = 'vector';
+  const [mode, setMode] = useState<'loading' | 'google' | 'vector' | 'schematic'>(initialMode);
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
 
   useEffect(() => {
-    if (maptilerKey) return;            // handled by the MapLibre effect below
+    if (mode === 'vector') return;      // handled by the MapLibre effect below
     if (!browserKey) { setMode('schematic'); return; }
     let cancelled = false;
     loadGoogleMaps(browserKey, mapId)
       .then(() => { if (!cancelled) setMode('google'); })
       .catch(() => { if (!cancelled) setMode('schematic'); });
     return () => { cancelled = true; };
-  }, [browserKey, mapId, maptilerKey]);
+  }, [browserKey, mapId, mode]);
 
   useEffect(() => {
     if (mode !== 'google' || !ref.current || !window.google?.maps) return;
@@ -114,7 +131,7 @@ export function MapView({
    * revoked or rate-limited key degrades instead of leaving a blank panel.
    */
   useEffect(() => {
-    if (mode !== 'maptiler' || !ref.current || !maptilerKey) return;
+    if (mode !== 'vector' || !ref.current) return;
     let cancelled = false;
     let map: any = null;
 
@@ -127,7 +144,7 @@ export function MapView({
       const centre = origin ?? results[0]?.hospital.location ?? { lat: 18.5204, lng: 73.8567 };
       map = new maplibre.Map({
         container: ref.current,
-        style: `https://api.maptiler.com/maps/streets-v2/style.json?key=${maptilerKey}`,
+        style: vectorStyle,
         center: [centre.lng, centre.lat],
         zoom: 11,
         attributionControl: { compact: true },
@@ -163,9 +180,9 @@ export function MapView({
     })().catch(() => { if (!cancelled) setMode('schematic'); });
 
     return () => { cancelled = true; if (map) { map.remove(); mapRef.current = null; } };
-  }, [mode, maptilerKey, results, origin, selectedId, onSelect]);
+  }, [mode, vectorStyle, results, origin, selectedId, onSelect]);
 
-  if (mode === 'maptiler') {
+  if (mode === 'vector') {
     return (
       <div className="relative h-full w-full">
         <div ref={ref} className="h-full w-full" />
