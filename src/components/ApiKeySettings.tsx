@@ -189,7 +189,26 @@ export function ApiKeySettings() {
               placeholder={providers.find((p) => p.id === provider)?.defaultModel ?? ''}
               className="mt-1 w-full rounded-lg border border-ink-300 px-3 py-2 text-sm"
               maxLength={80}
+              /*
+               * Chrome guesses at unlabelled single-line inputs near a
+               * password field and had been autofilling an email address in
+               * here, which then got saved as the model name. name + id give
+               * it something unambiguous and autoComplete="off" tells it not
+               * to guess. spellCheck off because model ids are not prose.
+               */
+              name="ai-model-id"
+              id="ai-model-id"
+              autoComplete="off"
+              spellCheck={false}
+              aria-describedby="ai-model-hint"
             />
+            <span id="ai-model-hint" className="mt-1 block text-xs text-ink-500">
+              Leave blank to use{' '}
+              <span className="font-mono">
+                {providers.find((p) => p.id === provider)?.defaultModel ?? 'the provider default'}
+              </span>
+              . This is a model name, not an email or account.
+            </span>
           </label>
         </div>
 
