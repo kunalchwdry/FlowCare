@@ -9,3 +9,11 @@ scripts/
 tests/
 shots-ui/
 *.pptx
+
+# Build artefacts and installed packages. Vercel installs and builds remotely,
+# so uploading these only slows the deploy.
+node_modules/
+.next/
+.next-build/
+*.tsbuildinfo
+.env.local
