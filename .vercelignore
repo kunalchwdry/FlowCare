@@ -1,0 +1,11 @@
+# Pitch material, not application code. deck/ alone is ~37 MB of screenshots
+# and an 8.7 MB walkthrough video; none of it is served by the app, and
+# shipping it would slow every build and deploy for no benefit.
+deck/
+docs/
+backups/
+.data/
+scripts/
+tests/
+shots-ui/
+*.pptx
