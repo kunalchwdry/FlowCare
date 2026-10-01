@@ -38,3 +38,5 @@ deck/preview/
 # Deck build intermediates (mark + downscaled screenshots), rebuilt by
 # deck/add_brand_and_screens.py on every run.
 deck/.build/
+.vercel
+.env*
