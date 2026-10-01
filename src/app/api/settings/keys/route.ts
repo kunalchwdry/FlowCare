@@ -31,6 +31,7 @@ export async function GET() {
         label: p.label,
         note: p.note,
         defaultModel: p.model,
+        models: p.models,
         serverKeyPresent: p.configured,
       })),
       keys: await listUserKeys(),

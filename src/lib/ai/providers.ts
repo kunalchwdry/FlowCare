@@ -19,7 +19,45 @@ export interface ProviderInfo {
   note: string;
   configured: boolean;
   model: string;
+  /** Known-good model ids for this provider, for the settings picker. */
+  models: string[];
 }
+
+/**
+ * Model ids offered in the settings picker, per provider.
+ *
+ * This exists because the field used to be free text and a single mistyped
+ * id ("llma" for "llama-3.3-70b-versatile") is accepted silently at save
+ * time and then fails on every call, with the provider's own error — which
+ * reads like a broken key rather than a typo.
+ *
+ * The list is deliberately short and conservative. It is not a catalogue:
+ * providers add and retire models constantly, so a custom entry stays
+ * available for anything not listed here.
+ */
+export const MODEL_CHOICES: Record<string, string[]> = {
+  gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
+  groq: [
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'mixtral-8x7b-32768',
+    'gemma2-9b-it',
+  ],
+  nvidia: ['meta/llama-3.3-70b-instruct', 'meta/llama-3.1-8b-instruct', 'mistralai/mixtral-8x7b-instruct-v0.1'],
+  openrouter: [
+    'meta-llama/llama-3.3-70b-instruct',
+    'google/gemini-2.0-flash-001',
+    'openai/gpt-4o-mini',
+    'mistralai/mistral-small',
+  ],
+  together: [
+    'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
+    'mistralai/Mixtral-8x7B-Instruct-v0.1',
+  ],
+  mistral: ['mistral-small-latest', 'mistral-large-latest', 'open-mistral-nemo'],
+};
 
 export interface ProviderCredentials {
   /** A user-supplied key, already decrypted server-side. Never logged. */
@@ -181,10 +219,18 @@ export const PROVIDERS: LlmProvider[] = [
 ];
 
 export function listProviders(): ProviderInfo[] {
-  return PROVIDERS.map((p) => ({
-    id: p.id, label: p.label, note: p.note,
-    configured: p.isConfigured(), model: p.model(),
-  }));
+  return PROVIDERS.map((p) => {
+    const listed = MODEL_CHOICES[p.id] ?? [];
+    const current = p.model();
+    // The configured default has to be selectable even when it is not one
+    // of the curated ids — otherwise opening the picker would silently
+    // change a deliberately-set model.
+    const models = listed.includes(current) ? listed : [current, ...listed];
+    return {
+      id: p.id, label: p.label, note: p.note,
+      configured: p.isConfigured(), model: current, models,
+    };
+  });
 }
 
 export function getProvider(id?: string | null): LlmProvider | null {
