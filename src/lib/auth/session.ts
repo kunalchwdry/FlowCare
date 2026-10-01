@@ -29,14 +29,52 @@ export async function getSession(): Promise<SessionUser | null> {
     if (!supabase) return null;
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) return null;
+
     const meta = (data.user.app_metadata ?? {}) as Record<string, unknown>;
-    const role = (meta.role as Role) ?? 'patient';
+    let role: Role = (meta.role as Role) ?? 'patient';
+    let hospitalId: string | null = (meta.hospital_id as string) ?? null;
+
+    /**
+     * Staff standing comes from the memberships table, not from app_metadata.
+     *
+     * app_metadata is only writable with the service-role key, which this
+     * deployment does not hold, so relying on it meant no account could ever
+     * be anything but a patient — the approval screen granted a role that
+     * nothing could read back.
+     *
+     * memberships already carries status, an approved_by trail, a version for
+     * optimistic concurrency, and a permissions allowlist. Its RLS policy is
+     * `user_id = private.actor() OR private.allowed(hospital_id,
+     * 'memberships:manage')`, so this query returns the caller's own row and
+     * nothing else even though it runs on the ordinary authenticated client.
+     * The database decides; we are only reading the verdict.
+     *
+     * Only an active membership counts. 'pending' is a submitted request and
+     * must not confer anything, which is what keeps approval meaningful.
+     */
+    const { data: membership } = await supabase
+      .from('memberships')
+      .select('hospital_id, permissions')
+      .eq('user_id', data.user.id)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+
+    if (membership) {
+      hospitalId = membership.hospital_id as string;
+      const perms = (membership.permissions as string[] | null) ?? [];
+      // The permission to manage other people's membership is what separates
+      // an administrator from a member of staff. Nothing else is tested here,
+      // because every endpoint re-checks the specific permission it needs.
+      role = perms.includes('memberships:manage') ? 'admin' : 'staff';
+    }
+
     return {
       id: data.user.id,
       email: data.user.email ?? '',
       name: (data.user.user_metadata?.full_name as string) ?? data.user.email ?? 'Patient',
       role,
-      hospitalId: (meta.hospital_id as string) ?? null,
+      hospitalId,
       source: 'supabase',
     };
   }
