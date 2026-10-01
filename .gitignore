@@ -34,3 +34,7 @@ scripts/.tmp/
 # Regenerate it with deck/fill_template.py once the content is settled.
 deck/*.pptx
 deck/preview/
+
+# Deck build intermediates (mark + downscaled screenshots), rebuilt by
+# deck/add_brand_and_screens.py on every run.
+deck/.build/
