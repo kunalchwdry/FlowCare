@@ -38,6 +38,26 @@ function loadGoogleMaps(key: string, mapId?: string): Promise<void> {
   return window.__fcMapsLoading;
 }
 
+
+/**
+ * A hospital can only be plotted if it actually has coordinates.
+ *
+ * Two rows in the live database carry lat/lng NULL, which arrive here as
+ * 0,0 — a real point in the Gulf of Guinea. Including them in fitBounds
+ * stretched the viewport from Pune to Null Island and rendered a map of
+ * Africa with two stray pins. A missing coordinate is missing data, not a
+ * location, so these are left off the map rather than drawn somewhere false.
+ * They remain in the list view, which does not claim to know where they are.
+ */
+function hasPlottableLocation(r: DiscoveryResult): boolean {
+  const loc = r.hospital?.location;
+  if (!loc) return false;
+  const { lat, lng } = loc;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat === 0 && lng === 0) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
 export function MapView({
   results, origin, selectedId, onSelect,
 }: {
@@ -141,7 +161,8 @@ export function MapView({
       await import('maplibre-gl/dist/maplibre-gl.css');
       if (cancelled || !ref.current) return;
 
-      const centre = origin ?? results[0]?.hospital.location ?? { lat: 18.5204, lng: 73.8567 };
+      const plottable = results.filter(hasPlottableLocation);
+      const centre = origin ?? plottable[0]?.hospital.location ?? { lat: 18.5204, lng: 73.8567 };
       map = new maplibre.Map({
         container: ref.current,
         style: vectorStyle,
@@ -156,7 +177,7 @@ export function MapView({
       map.on('load', () => {
         if (cancelled) return;
         const bounds = new maplibre.LngLatBounds();
-        for (const r of results) {
+        for (const r of plottable) {
           const { lat, lng } = r.hospital.location;
           const el = document.createElement('button');
           el.type = 'button';
@@ -175,7 +196,7 @@ export function MapView({
           bounds.extend([lng, lat]);
         }
         if (origin) bounds.extend([origin.lng, origin.lat]);
-        if (results.length) map.fitBounds(bounds, { padding: 56, maxZoom: 14, duration: 0 });
+        if (plottable.length) map.fitBounds(bounds, { padding: 56, maxZoom: 14, duration: 0 });
       });
     })().catch(() => { if (!cancelled) setMode('schematic'); });
 
