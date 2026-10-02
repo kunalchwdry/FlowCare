@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getRepo } from '@/lib/data';
+import { CancelAppointment } from '@/components/appointments/CancelAppointment';
 import { getSession } from '@/lib/auth/session';
 import { IconCalendar, IconSearch } from '@/components/Icons';
 
@@ -72,6 +73,7 @@ export default async function AppointmentsPage() {
         <div className="mt-3 space-y-2">
           {upcoming.length === 0 && <p className="text-xs text-ink-500">No upcoming appointments.</p>}
           {upcoming.map((a) => (
+            <div key={a.id}>
             <Link
               key={a.id}
               href={`/appointments/${a.id}`}
@@ -81,7 +83,7 @@ export default async function AppointmentsPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{byId.get(a.hospitalId)?.name ?? a.hospitalId}</p>
                 <p className="text-[11px] text-ink-500">
-                  {a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleString()}
+                  {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleString()}
                 </p>
                 {/*
                   * The hospital's decision, in the patient's words. The raw
@@ -123,6 +125,18 @@ export default async function AppointmentsPage() {
                 {PATIENT_STATUS[a.status] ?? a.status}
               </span>
             </Link>
+            {/* Outside the Link: a cancel control nested in a navigation
+                element fires the navigation on the way to the button. */}
+            {['requested', 'booked', 'reschedule_proposed'].includes(a.status) && (
+              <div className="-mt-1 mb-1 flex justify-end px-3">
+                <CancelAppointment
+                  appointmentId={a.id}
+                  version={a.version ?? 1}
+                  hospitalName={byId.get(a.hospitalId)?.name ?? 'The hospital'}
+                />
+              </div>
+            )}
+            </div>
           ))}
         </div>
       </section>
@@ -141,7 +155,7 @@ export default async function AppointmentsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{h?.name ?? a.hospitalId}</p>
                   <p className="text-[11px] text-ink-500">
-                    {a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleDateString()}
+                    {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleDateString()}
                   </p>
                   {/* The hospital's stated reason, shown verbatim. A decline
                       with no explanation is worse than none at all. */}

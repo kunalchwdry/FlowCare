@@ -84,7 +84,7 @@ export default async function HospitalQueue() {
             <thead className="border-b border-ink-200 bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
               <tr>
                 <th className="px-4 py-2 font-semibold">#</th>
-                <th className="px-4 py-2 font-semibold">Appointment</th>
+                <th className="px-4 py-2 font-semibold">Patient</th>
                 <th className="px-4 py-2 font-semibold">Department</th>
                 <th className="px-4 py-2 font-semibold">Time</th>
                 <th className="px-4 py-2 font-semibold">Status</th>
@@ -95,8 +95,15 @@ export default async function HospitalQueue() {
               {queue.map((a, i) => (
                 <tr key={a.id} className="align-top">
                   <td className="px-4 py-3 font-semibold tabular-nums text-ink-500">{i + 1}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-ink-700">{a.id}</td>
-                  <td className="px-4 py-3 text-ink-700">{a.departmentId.split(':dept:')[1] ?? a.departmentId}</td>
+                  <td className="px-4 py-3">
+                    <p className="font-semibold text-ink-900">
+                      {a.patientName || <span className="text-ink-400">Name not given</span>}
+                    </p>
+                    <p className="font-mono text-[11px] text-ink-500">{a.id.slice(0, 8)}…</p>
+                  </td>
+                  <td className="px-4 py-3 text-ink-700">
+                    {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? a.departmentId}
+                  </td>
                   <td className="px-4 py-3 tabular-nums text-ink-700">{time(a.scheduledFor)}</td>
                   <td className="px-4 py-3"><StatusBadge status={a.status} /></td>
                   <td className="px-4 py-3">
