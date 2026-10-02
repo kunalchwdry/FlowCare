@@ -6,6 +6,7 @@
  * enough data yet" — a fabricated denominator is worse than a blank.
  */
 import type { Appointment, AppointmentEvent } from '@/lib/types';
+import { todayKey, zonedDateKey } from '@/lib/time';
 
 export interface HospitalMetrics {
   todayTotal: number;
@@ -27,15 +28,17 @@ export interface HospitalMetrics {
   topDepartments: { departmentId: string; count: number }[];
 }
 
+// Compared in the clinic's timezone; a UTC slice puts early-morning
+// appointments on the wrong day.
 const isToday = (iso: string | null | undefined, today: string) =>
-  Boolean(iso && iso.slice(0, 10) === today);
+  Boolean(iso && zonedDateKey(iso) === today);
 
 export function computeMetrics(
   appointments: Appointment[],
   events: AppointmentEvent[],
   now = new Date(),
 ): HospitalMetrics {
-  const today = now.toISOString().slice(0, 10);
+  const today = todayKey(undefined, now);
   const byStatus = (s: Appointment['status']) => appointments.filter((a) => a.status === s).length;
 
   /*

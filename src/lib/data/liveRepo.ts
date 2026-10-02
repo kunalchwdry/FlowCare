@@ -29,6 +29,7 @@ import type {
 
 const URL_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { clockTime, zonedDateKey } from '@/lib/time';
 import {
   fromDbStatus, idempotencyKey, isPersistable, toDbAction,
 } from '@/lib/appointments/dbVocabulary';
@@ -275,9 +276,16 @@ async function realSessions(hospitalIds?: string[]): Promise<ClinicSession[]> {
       id: String(s.id),
       hospitalId: String(d.hospital_id),
       departmentId: String(d.id),
-      date: s.starts_at.slice(0, 10),
-      startTime: start.toISOString().slice(11, 16),
-      endTime: end.toISOString().slice(11, 16),
+      /*
+       * Derived in the clinic's timezone, not UTC.
+       *
+       * These were `toISOString()` slices, which is UTC by definition: a
+       * 09:30 Pune clinic became 04:00, and a 00:30 one was filed under
+       * the previous day. Both are times a patient could act on.
+       */
+      date: zonedDateKey(s.starts_at),
+      startTime: clockTime(start),
+      endTime: clockTime(end),
       capacity,
       booked,
       status: open ? 'open' : 'full',

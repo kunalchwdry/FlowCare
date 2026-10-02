@@ -3,6 +3,7 @@ import { getRepo } from '@/lib/data';
 import { HospitalShell, Stat, NoData } from '@/components/hospital/HospitalShell';
 import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { summariseReviews } from '@/lib/hospital/portalData';
+import { formatDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Reviews — FlowCare hospital portal' };
@@ -98,9 +99,7 @@ export default async function HospitalReviews() {
                   Verified visit
                 </span>
                 <span className="ml-auto text-xs text-ink-500">
-                  {new Date(r.createdAt).toLocaleDateString('en-IN', {
-                    day: 'numeric', month: 'short', year: 'numeric',
-                  })}
+                  {formatDate(r.createdAt)}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">

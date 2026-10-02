@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { IconCalendar, IconChevron } from '@/components/Icons';
+import { formatDate } from '@/lib/time';
 
 export interface PickableSlot {
   id: string;
@@ -79,7 +80,7 @@ export function SlotPicker({
             <div key={s.id} className="rounded-xl border border-ink-200 p-3">
               <p className="flex items-center gap-1.5 text-sm font-semibold">
                 <IconCalendar width={14} height={14} className="text-brand-600" />
-                {new Date(s.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                {formatDate(s.date)}
               </p>
               <p className="mt-0.5 text-[11px] text-ink-500">
                 {s.startTime}–{s.endTime} · {free} of {s.capacity} slots free

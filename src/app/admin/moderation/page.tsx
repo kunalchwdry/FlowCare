@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { IconShield } from '@/components/Icons';
 import type { HospitalReview, ModerationEvent, ReviewReport } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,7 +72,7 @@ export default function ModerationPage() {
                 <span className="fc-pill bg-amber-100 text-amber-900">{r.status}</span>
                 <span className="font-semibold text-ink-700">{r.hospitalId}</span>
                 <span className="text-ink-500">{r.authorHandle}</span>
-                <span className="ml-auto text-ink-400">{new Date(r.createdAt).toLocaleString()}</span>
+                <span className="ml-auto text-ink-400">{formatDateTime(r.createdAt)}</span>
               </div>
               {r.comment && <p className="mt-1.5 text-xs text-ink-700">{r.comment}</p>}
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -93,7 +94,7 @@ export default function ModerationPage() {
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <span className="fc-pill bg-ink-100 text-ink-700">{rep.reason}</span>
                 <span className="fc-pill bg-ink-100 text-ink-700">{rep.status}</span>
-                <span className="ml-auto text-ink-400">{new Date(rep.createdAt).toLocaleString()}</span>
+                <span className="ml-auto text-ink-400">{formatDateTime(rep.createdAt)}</span>
               </div>
               {rep.review?.comment && <p className="mt-1.5 text-xs text-ink-700">“{rep.review.comment}”</p>}
               {rep.status === 'open' && (
@@ -122,7 +123,7 @@ export default function ModerationPage() {
               {data.events.length === 0 && <tr><td colSpan={6} className="p-2 text-ink-500">No events yet.</td></tr>}
               {data.events.map((e) => (
                 <tr key={e.id} className="border-t border-ink-100">
-                  <td className="p-1.5 text-ink-500">{new Date(e.createdAt).toLocaleString()}</td>
+                  <td className="p-1.5 text-ink-500">{formatDateTime(e.createdAt)}</td>
                   <td className="p-1.5">{e.actorRole}</td>
                   <td className="p-1.5 font-semibold">{e.action}</td>
                   <td className="p-1.5 text-ink-600">{e.previousStatus} → {e.newStatus}</td>

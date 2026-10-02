@@ -4,16 +4,12 @@ import { HospitalShell, Stat, StatusBadge } from '@/components/hospital/Hospital
 import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { AppointmentActions } from '@/components/hospital/AppointmentActions';
 import { todaysQueue } from '@/lib/hospital/portalData';
+import { formatTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Queue — FlowCare hospital portal' };
 
-function time(iso: string) {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? '—'
-    : d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-}
+const time = (iso: string) => formatTime(iso);
 
 /**
  * Today's operational queue.

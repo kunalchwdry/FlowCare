@@ -12,6 +12,7 @@
  */
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import type { Appointment, AppointmentEvent, HospitalReview } from '@/lib/types';
+import { todayKey, zonedDateKey, zonedHour } from '@/lib/time';
 
 export interface StaffMember {
   userId: string;
@@ -94,9 +95,11 @@ export async function listMembershipEvents(hospitalId: string): Promise<Membersh
 export const QUEUE_STATES = ['booked', 'checked_in', 'in_progress'] as const;
 
 export function todaysQueue(appointments: Appointment[], now = new Date()): Appointment[] {
-  const today = now.toISOString().slice(0, 10);
+  // The clinic's day, not UTC's: an early-morning IST appointment falls on
+  // the previous UTC date and would drop off "today" on the day it runs.
+  const today = todayKey(undefined, now);
   return appointments
-    .filter((a) => (a.scheduledFor ?? '').slice(0, 10) === today)
+    .filter((a) => zonedDateKey(a.scheduledFor) === today)
     .filter((a) => (QUEUE_STATES as readonly string[]).includes(a.status))
     .sort((a, b) => a.scheduledFor.localeCompare(b.scheduledFor));
 }
@@ -204,8 +207,10 @@ export function demandByDepartment(appointments: Appointment[]): { id: string; c
 export function demandByHour(appointments: Appointment[]): { hour: number; count: number }[] {
   const m = new Map<number, number>();
   for (const a of appointments) {
-    const h = new Date(a.scheduledFor).getHours();
-    if (Number.isFinite(h)) m.set(h, (m.get(h) ?? 0) + 1);
+    // getHours() is the SERVER's hour — UTC in production, so every busy
+    // period was reported five and a half hours early.
+    const h = zonedHour(a.scheduledFor);
+    if (h !== null) m.set(h, (m.get(h) ?? 0) + 1);
   }
   return [...m.entries()].map(([hour, count]) => ({ hour, count })).sort((a, b) => a.hour - b.hour);
 }

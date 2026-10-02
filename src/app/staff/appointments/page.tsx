@@ -4,6 +4,7 @@ import { requireStaffPage } from '@/lib/auth/guards';
 import { getRepo } from '@/lib/data';
 import { EmptyState, ErrorState } from '@/components/States';
 import type { Appointment } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Appointments — FlowCare' };
 export const dynamic = 'force-dynamic';
@@ -15,13 +16,7 @@ const GROUPS: Array<{ title: string; statuses: Appointment['status'][]; blurb: s
 ];
 
 function when(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleString('en-IN', {
-        weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
-        timeZone: 'Asia/Kolkata',
-      });
+  return formatDateTime(iso);
 }
 
 export default async function StaffAppointmentsPage() {

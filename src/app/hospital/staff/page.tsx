@@ -4,6 +4,7 @@ import { HospitalShell, Stat, NoData } from '@/components/hospital/HospitalShell
 import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { listStaff, listMembershipEvents } from '@/lib/hospital/portalData';
 import type { HospitalPermission } from '@/lib/auth/hospital';
+import { formatDate, formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Staff — FlowCare hospital portal' };
@@ -116,7 +117,7 @@ export default async function HospitalStaff() {
                   </td>
                   <td className="px-4 py-3 text-xs text-ink-500">
                     {s.updatedAt
-                      ? new Date(s.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                      ? formatDate(s.updatedAt)
                       : '—'}
                   </td>
                 </tr>
@@ -176,9 +177,7 @@ export default async function HospitalStaff() {
                 subject {e.subjectId ? `${e.subjectId.slice(0, 8)}…` : '—'}
               </span>
               <span className="ml-auto text-xs text-ink-500">
-                {new Date(e.occurredAt).toLocaleString('en-IN', {
-                  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-                })}
+                {formatDateTime(e.occurredAt)}
               </span>
             </li>
           ))}

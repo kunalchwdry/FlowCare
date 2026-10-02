@@ -8,6 +8,7 @@
 import type { DiscoveryResult } from '@/lib/types';
 import { label } from '@/lib/discovery/filters';
 import type { DiscoveryFilters } from '@/lib/discovery/filters';
+import { formatTime } from '@/lib/time';
 
 export interface EvidenceItem {
   kind: 'flowcare' | 'google' | 'geo';
@@ -39,8 +40,8 @@ export function buildEvidence(r: DiscoveryResult, filters: DiscoveryFilters): Ev
       a.state === 'unknown'
         ? 'FlowCare has no session data for this hospital, so availability is unknown'
         : a.state === 'none'
-          ? `No open FlowCare slots in the next ${a.windowDays} days (checked ${new Date(a.computedAt).toLocaleTimeString()})`
-          : `${a.openSlots} open FlowCare slot(s) in the next ${a.windowDays} days; earliest ${a.nextAvailableDate} (checked ${new Date(a.computedAt).toLocaleTimeString()})`,
+          ? `No open FlowCare slots in the next ${a.windowDays} days (checked ${formatTime(a.computedAt)})`
+          : `${a.openSlots} open FlowCare slot(s) in the next ${a.windowDays} days; earliest ${a.nextAvailableDate} (checked ${formatTime(a.computedAt)})`,
   });
 
   if (r.external.data?.rating !== undefined) {
@@ -65,7 +66,7 @@ export function buildEvidence(r: DiscoveryResult, filters: DiscoveryFilters): Ev
   if (r.queue?.published && r.queue.medianWaitMinutes !== null) {
     out.push({
       kind: 'flowcare',
-      text: `Hospital publishes queue info: about ${r.queue.medianWaitMinutes} min median wait, ${r.queue.waitingCount} waiting (as of ${r.queue.observedAt ? new Date(r.queue.observedAt).toLocaleTimeString() : 'unknown'})`,
+      text: `Hospital publishes queue info: about ${r.queue.medianWaitMinutes} min median wait, ${r.queue.waitingCount} waiting (as of ${r.queue.observedAt ? formatTime(r.queue.observedAt) : 'unknown'})`,
     });
   }
 
