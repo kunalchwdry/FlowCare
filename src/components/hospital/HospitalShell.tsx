@@ -13,9 +13,21 @@ import type { HospitalActor, HospitalPermission } from '@/lib/auth/hospital';
  * and every route re-checks server-side, because a hidden link has never
  * stopped anyone typing a URL.
  */
-const NAV: { href: string; label: string; needs?: HospitalPermission }[] = [
-  { href: '/hospital', label: 'Dashboard' },
-  { href: '/hospital/appointments', label: 'Appointments', needs: 'appointments:read' },
+interface NavItem {
+  href: string;
+  label: string;
+  needs?: HospitalPermission;
+  /**
+   * Built and reachable. Unbuilt entries are shown greyed rather than
+   * linked: a sidebar that navigates to a 404 reads as a broken product,
+   * and silently hiding them would misrepresent how finished this is.
+   */
+  ready?: boolean;
+}
+
+const NAV: NavItem[] = [
+  { href: '/hospital', label: 'Dashboard', ready: true },
+  { href: '/hospital/appointments', label: 'Appointments', needs: 'appointments:read', ready: true },
   { href: '/hospital/queue', label: 'Queue', needs: 'queue:read' },
   { href: '/hospital/patients', label: 'Patients', needs: 'appointments:read' },
   { href: '/hospital/reviews', label: 'Reviews', needs: 'reviews:moderate' },
@@ -68,6 +80,21 @@ export function HospitalShell({
         <nav className="flex gap-1 overflow-x-auto p-2 md:flex-col md:overflow-visible">
           {items.map((n) => {
             const on = n.href === '/hospital' ? active === '/hospital' : active.startsWith(n.href);
+            if (!n.ready) {
+              return (
+                <span
+                  key={n.href}
+                  aria-disabled="true"
+                  title="Not built yet"
+                  className="flex items-center justify-between gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold text-ink-300"
+                >
+                  {n.label}
+                  <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-ink-400">
+                    Soon
+                  </span>
+                </span>
+              );
+            }
             return (
               <Link
                 key={n.href}
