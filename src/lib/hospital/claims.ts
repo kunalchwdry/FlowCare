@@ -41,6 +41,13 @@ export interface HospitalClaim {
   /** How they say the claim can be checked: a website, a letterhead, a desk number. */
   evidenceNote: string | null;
   status: ClaimStatus;
+  /**
+   * Automated checks, recorded at submission and updated by /verify-domain.
+   * `emailDomainMatches: null` means we had nothing to compare against —
+   * distinct from false, which means we compared and it did not match.
+   */
+  emailDomainMatches: boolean | null;
+  domainVerifiedAt: string | null;
   createdAt: string;
   decidedAt: string | null;
   decisionNote: string | null;
@@ -100,6 +107,7 @@ export async function createClaim(input: {
   contactPhone?: string | null;
   statedRole: string;
   evidenceNote?: string | null;
+  emailDomainMatches?: boolean | null;
 }): Promise<{ claim: HospitalClaim; duplicate: boolean }> {
   const rows = await readAll();
   const email = input.contactEmail.trim().toLowerCase();
@@ -127,6 +135,8 @@ export async function createClaim(input: {
     // Always 'pending'. There is no input to this function that can produce
     // any other starting state, which is what makes the guarantee checkable.
     status: 'pending',
+    emailDomainMatches: input.emailDomainMatches ?? null,
+    domainVerifiedAt: null,
     createdAt: new Date().toISOString(),
     decidedAt: null,
     decisionNote: null,
@@ -169,4 +179,23 @@ export function integrationState(opts: {
     label: 'Discovery only',
     detail: 'Listed so people can find it. Appointments are not handled through FlowCare.',
   };
+}
+
+
+/** Record a successful domain proof. Still does not approve the claim. */
+export async function markDomainVerified(claimId: string): Promise<HospitalClaim | null> {
+  const rows = await readAll();
+  const row = rows.find((r) => r.id === claimId);
+  if (!row) return null;
+  row.domainVerifiedAt = new Date().toISOString();
+  // Moves to 'verifying', not 'approved'. Proving control of a domain shows
+  // the claimant runs the hospital's website; it does not show the hospital
+  // wants this person holding its appointments.
+  if (row.status === 'pending') row.status = 'verifying';
+  await writeAll(rows);
+  return row;
+}
+
+export async function getClaim(id: string): Promise<HospitalClaim | null> {
+  return (await readAll()).find((r) => r.id === id) ?? null;
 }
