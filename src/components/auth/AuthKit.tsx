@@ -31,9 +31,19 @@ export function AuthShell({
   footer?: ReactNode;
   aside?: ReactNode;
 }) {
+  /*
+   * Two columns only when there is genuinely room for both.
+   *
+   * The side panel is a fixed width, so pairing it with a 1fr column at the
+   * lg breakpoint (1024px) left the form roughly 650px on paper — and far
+   * less once browser zoom is in play, at which point the text wrapped one
+   * word per line and the panel visually collided with the card. Splitting
+   * at xl guarantees the form ~900px before the panel appears at all, and
+   * min-w-0 stops a long email forcing a track wider than its share.
+   */
   return (
-    <div className="mx-auto grid w-full max-w-5xl items-start gap-8 py-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <div className="fc-card animate-fade-up p-6 sm:p-8">
+    <div className="mx-auto grid w-full max-w-5xl items-start gap-8 py-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="fc-card animate-fade-up min-w-0 p-6 sm:p-8">
         <FlowCareLogo size="md" href="/" />
         <div className="mt-6">
           <RoleBadge role={role} />
@@ -43,7 +53,7 @@ export function AuthShell({
         <div className="mt-6">{children}</div>
         {footer && <div className="mt-6 border-t border-ink-100 pt-5 text-sm text-ink-600">{footer}</div>}
       </div>
-      {aside && <div className="hidden lg:block">{aside}</div>}
+      {aside && <div className="hidden min-w-0 xl:block">{aside}</div>}
     </div>
   );
 }
