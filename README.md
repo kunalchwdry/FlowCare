@@ -765,3 +765,60 @@ multi-instance safe and must be replaced before real traffic).
 `docs/security.md` · `docs/api.md` · `docs/testing.md` ·
 `docs/research/` (research trail, 01–08) · `docs/research/sources.md`
 (73 sources, each with URL, date, confidence grade and limitation).
+
+## Current status
+
+Last verified 2 October 2026. 333 tests, `tsc --noEmit` clean, production
+build clean.
+
+### Working end to end
+
+- **Patient journey** — discovery over 62 real hospitals, map, hospital
+  profiles with per-field provenance, appointment *requests*.
+- **Hospital portal** at `/hospital`, and on its own hostname
+  (`hospital-flowcare.vercel.app`) via a middleware rewrite. The hostname
+  selects context only; it grants nothing.
+- **The request → confirm loop.** Staff accept, decline, propose another
+  time or cancel. Every move goes through one state machine, writes an
+  appointment event, and the patient sees the result.
+- **Staff standing comes from `memberships`**, not from anything the browser
+  sends. No global admin exists in code, not merely in policy.
+- **Hospital claims** with four ranked verification routes, including an
+  automated DNS TXT check. A claim grants nothing on its own.
+- **AI key checks** make one real provider call and report six distinct
+  outcomes.
+
+### Not built
+
+The hospital sidebar marks these "Soon" rather than linking to them:
+Queue, Patients, Reviews, Analytics, Hospital profile, Staff management.
+
+Also absent: migration `0009` (a `notifications` table — notices are
+currently held in the demo store), an in-app reviewer for hospital claims
+(approving one means touching the database), and patient-side controls for
+accepting a proposed time (the API exists and is tested; the UI does not).
+
+### Known limitations
+
+- **`supabaseRepo` cannot transition appointments.** It throws
+  `NOT_IMPLEMENTED_SUPABASE_TRANSITION`. The live project has a
+  `transition_appointment` RPC, but its accepted action vocabulary has never
+  been read back from the database and guessing it would mean writing the
+  wrong status silently. Production runs `liveRepo`, which does work.
+- **`supabaseRepo` also has the wrong schema.** It filters `hospitals` on an
+  `active` column; the live table has `published`. Turning off
+  `FLOWCARE_LIVE_READS` empties the hospital list.
+- **Appointment slots are generated**, not read from the live `slots` table.
+  The banner says so on every page.
+- **Notifications are in-app only.** No mail or SMS provider is configured
+  and nothing claims otherwise.
+- **Rate limiting counts in process memory**, so on serverless it is per
+  warm instance rather than global.
+- **Demo accounts are refused** on a production build with a real Supabase
+  project unless `FLOWCARE_ALLOW_DEMO_AUTH=true`. The test harness sets it.
+
+### Not production ready
+
+Externally verified: database, RLS, RPCs, live reads, the appointment loop
+on the demo repository. Not verified: live Supabase writes, Google Places,
+and any AI provider — no key has been exercised against a real provider here.

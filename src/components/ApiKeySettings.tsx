@@ -43,6 +43,12 @@ export function ApiKeySettings() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
+  /**
+   * Last check result per provider. Held separately from the stored key
+   * status because "rate limited" and "provider down" are facts about this
+   * attempt, not about the key — persisting them would mislabel a good key.
+   */
+  const [checks, setChecks] = useState<Record<string, { status: string; message: string; model: string | null; checkedAt: string }>>({});
 
   const load = useCallback(async () => {
     try {
@@ -317,7 +323,7 @@ export function ApiKeySettings() {
                       disabled={testing !== null}
                       className="fc-btn-secondary !px-3 !py-1.5 text-xs"
                     >
-                      {testing === k.provider ? 'Testing…' : 'Test key'}
+                      {testing === k.provider ? 'Checking…' : 'Test key'}
                     </button>
                     <button
                       onClick={() => remove(k.provider)}
@@ -328,10 +334,19 @@ export function ApiKeySettings() {
                     </button>
                   </div>
 
-                  {k.status === 'invalid' && k.lastError && (
-                    <p className="w-full rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                      {k.lastError}
-                    </p>
+                  {/* This session's check wins over the stored status: it
+                      distinguishes a rejected key from a rate limit or an
+                      outage, which the stored boolean cannot. */}
+                  {checks[k.provider] ? (
+                    <div className="w-full">
+                      <CheckResult {...checks[k.provider]} />
+                    </div>
+                  ) : (
+                    k.status === 'invalid' && k.lastError && (
+                      <p className="w-full rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                        {k.lastError}
+                      </p>
+                    )
                   )}
                 </li>
               );
@@ -353,4 +368,38 @@ function StatusChip({ status }: { status: StoredKey['status'] }) {
   } as const;
   const s = map[status];
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${s.cls}`}>{s.text}</span>;
+}
+
+/**
+ * The outcome of the most recent check.
+ *
+ * Six states rather than a tick or a cross, because the fixes differ: a
+ * rejected key needs replacing, a rate-limited one needs waiting, and an
+ * unreachable provider needs nothing at all from the user.
+ */
+export function CheckResult({
+  status, message, model, checkedAt,
+}: { status: string; message: string; model: string | null; checkedAt: string }) {
+  const style: Record<string, { label: string; cls: string }> = {
+    working:              { label: 'Working',             cls: 'border-emerald-200 bg-emerald-50 text-emerald-900' },
+    invalid_key:          { label: 'Key rejected',        cls: 'border-rose-200 bg-rose-50 text-rose-900' },
+    rate_limited:         { label: 'Rate limited',        cls: 'border-amber-200 bg-amber-50 text-amber-900' },
+    model_unavailable:    { label: 'Model not found',     cls: 'border-amber-200 bg-amber-50 text-amber-900' },
+    provider_unavailable: { label: 'Provider unavailable',cls: 'border-ink-200 bg-ink-50 text-ink-800' },
+    configuration_error:  { label: 'Configuration problem',cls: 'border-ink-200 bg-ink-50 text-ink-800' },
+  };
+  const s = style[status] ?? style.configuration_error;
+  const when = new Date(checkedAt);
+  return (
+    <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${s.cls}`}>
+      <p className="font-bold">
+        {status === 'working' ? '✓' : '✕'} {s.label}
+      </p>
+      <p className="mt-0.5">{message}</p>
+      <p className="mt-1 opacity-70">
+        {model ? `Model: ${model} · ` : ''}
+        Checked {Number.isNaN(when.getTime()) ? checkedAt : when.toLocaleTimeString('en-IN')}
+      </p>
+    </div>
+  );
 }
