@@ -24,7 +24,10 @@ const SIGNED_IN_AREAS = ['/patient', '/staff', '/hospital'] as const;
 /** ...except the doors into them. */
 const PUBLIC_AUTH_PATHS = [
   '/patient/login', '/patient/signup', '/staff/login', '/staff/register',
-  '/hospital/login',
+  // Both hospital doors are public by necessity: /login is where you sign
+  // in, and /register exists precisely for hospitals where nobody has an
+  // account yet. Gating either behind a credential would be circular.
+  '/hospital/login', '/hospital/register',
 ];
 
 /**

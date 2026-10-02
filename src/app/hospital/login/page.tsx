@@ -63,6 +63,22 @@ export default async function HospitalLogin({
           </Link>
         </div>
 
+        {/* The other situation: nobody at this hospital is on FlowCare yet,
+            so there is no administrator to ask. That needs its own door. */}
+        <div className="mt-4 rounded-xl border border-brand-200 bg-brand-50 p-4">
+          <p className="text-sm font-semibold text-ink-900">Is your hospital not on FlowCare yet?</p>
+          <p className="mt-1 text-sm text-ink-700">
+            If nobody from your hospital manages its listing, claim it. A reviewer verifies the
+            claim before any access is granted.
+          </p>
+          <Link
+            href="/hospital/register"
+            className="mt-3 inline-flex fc-btn-primary !py-2 text-sm"
+          >
+            Register your hospital
+          </Link>
+        </div>
+
         <p className="mt-6 text-center text-xs text-ink-500">
           Looking for care rather than working here?{' '}
           <Link href="/patient/login" className="font-semibold text-brand-700 underline underline-offset-2">
