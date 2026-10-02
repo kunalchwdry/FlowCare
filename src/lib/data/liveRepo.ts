@@ -23,10 +23,17 @@ import path from 'node:path';
 import { demoRepo } from './demoRepo';
 import type { Repo } from './repo';
 import type {
+  Appointment,
   ClinicSession, Hospital, HospitalDepartment, HospitalService, HospitalType,
 } from '@/lib/types';
 
 const URL_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
+import {
+  fromDbStatus, idempotencyKey, isPersistable, toDbAction,
+} from '@/lib/appointments/dbVocabulary';
+import type { Action } from '@/lib/appointments/stateMachine';
+
 const ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 /** Facility data changes rarely; re-reading it on every render is wasteful. */
@@ -182,44 +189,11 @@ async function loadHospitals(): Promise<Hospital[]> {
  * offering a fake slot at a real hospital would be the worst thing this
  * product could do.
  */
-function syntheticSessionsFor(hospitals: Hospital[]): ClinicSession[] {
-  const out: ClinicSession[] = [];
-  const today = new Date();
-  for (const h of hospitals) {
-    if (!h.flowcareVerified) continue;
-    for (const dept of h.departments) {
-      if (!dept.active) continue;
-      for (let day = 0; day < 14; day += 1) {
-        const date = new Date(today);
-        date.setDate(today.getDate() + day);
-        if (date.getDay() === 0) continue; // closed Sundays
-        const iso = date.toISOString().slice(0, 10);
-        const capacity = 8 + ((day + dept.name.length) % 7);
-        const booked = (day * 3 + dept.name.length) % Math.max(1, capacity - 2);
-        out.push({
-          // URL-safe separator. A colon is legal inside a path segment but
-          // it travels badly through routers and proxies, and this id is
-          // used directly in /appointments/<id>.
-          id: `${h.id}__${dept.id}__${iso}`,
-          hospitalId: h.id,
-          departmentId: `${h.id}:dept:${dept.specialty}`,
-          date: iso,
-          startTime: day % 2 === 0 ? '09:30' : '11:00',
-          endTime: day % 2 === 0 ? '13:00' : '16:30',
-          capacity,
-          booked,
-          status: 'open',
-        });
-      }
-    }
-  }
-  return out;
-}
 
 let sessionCache: { at: number; rows: ClinicSession[] } | null = null;
 async function sessions(): Promise<ClinicSession[]> {
   if (sessionCache && Date.now() - sessionCache.at < TTL_MS) return sessionCache.rows;
-  const rows = syntheticSessionsFor(await loadHospitals());
+  const rows = await realSessions();
   sessionCache = { at: Date.now(), rows };
   return rows;
 }
@@ -241,31 +215,257 @@ const REQ_DIR = path.join(process.cwd(), '.data');
 const REQ_FILE = path.join(REQ_DIR, 'live-requests.json');
 let reqCache: { mtimeMs: number; rows: StoredRequest[] } | null = null;
 
-function readRequests(): StoredRequest[] {
-  try {
-    const stat = fs.statSync(REQ_FILE);
-    if (reqCache && reqCache.mtimeMs === stat.mtimeMs) return reqCache.rows;
-    const rows = JSON.parse(fs.readFileSync(REQ_FILE, 'utf8')) as StoredRequest[];
-    reqCache = { mtimeMs: stat.mtimeMs, rows };
-    return rows;
-  } catch {
-    return [];
+
+
+
+/**
+ * Real bookable slots, read from the `slots` table.
+ *
+ * This repository used to invent sessions for every department — fourteen
+ * days of them, per department, for any hospital marked verified. That is
+ * why a booking could never persist: the session id referred to nothing,
+ * so there was no row for Supabase to book against.
+ *
+ * Only genuine rows are returned now. A hospital with no slots shows no
+ * availability, which is the honest answer and the one the product already
+ * promises: never infer availability that has not been published.
+ */
+async function realSessions(hospitalIds?: string[]): Promise<ClinicSession[]> {
+  const nowIso = new Date().toISOString();
+  const depts = await rest(
+    `departments?select=id,hospital_id,name,booking_open${
+      hospitalIds?.length ? `&hospital_id=in.(${hospitalIds.join(',')})` : ''
+    }`,
+  );
+  if (depts.length === 0) return [];
+  const byDept = new Map(depts.map((d) => [String(d.id), d]));
+
+  const slots = await rest(
+    `slots?select=id,department_id,starts_at,ends_at,kind,capacity,booking_open` +
+      `&department_id=in.(${[...byDept.keys()].join(',')})` +
+      `&starts_at=gt.${nowIso}&order=starts_at.asc&limit=400`,
+  );
+
+  // How many seats each slot has already given out.
+  let taken = new Map<string, number>();
+  if (slots.length) {
+    try {
+      const appts = await rest(
+        `appointments?select=slot_id,status&slot_id=in.(${slots.map((s) => s.id).join(',')})`,
+      );
+      for (const a of appts) {
+        if (['cancelled', 'denied', 'no_show'].includes(String(a.status))) continue;
+        const k = String(a.slot_id);
+        taken.set(k, (taken.get(k) ?? 0) + 1);
+      }
+    } catch {
+      // anon cannot read appointments; seats fall back to 0 taken rather
+      // than hiding slots that may well be free.
+    }
   }
+
+  return slots.map((s) => {
+    const d = byDept.get(String(s.department_id))!;
+    const start = new Date(s.starts_at);
+    const end = new Date(s.ends_at);
+    const booked = taken.get(String(s.id)) ?? 0;
+    const capacity = Number(s.capacity ?? 0);
+    const open = Boolean(s.booking_open) && Boolean(d.booking_open) && booked < capacity;
+    return {
+      id: String(s.id),
+      hospitalId: String(d.hospital_id),
+      departmentId: String(d.id),
+      date: s.starts_at.slice(0, 10),
+      startTime: start.toISOString().slice(11, 16),
+      endTime: end.toISOString().slice(11, 16),
+      capacity,
+      booked,
+      status: open ? 'open' : 'full',
+    } satisfies ClinicSession;
+  });
 }
 
-function writeRequests(rows: StoredRequest[]) {
-  try {
-    fs.mkdirSync(REQ_DIR, { recursive: true });
-    fs.writeFileSync(REQ_FILE, JSON.stringify(rows, null, 2), 'utf8');
-    reqCache = { mtimeMs: fs.statSync(REQ_FILE).mtimeMs, rows };
-  } catch {
-    /* read-only environment: the request is still returned to the caller */
-  }
+/** Map a live `appointments` row onto the application's shape. */
+function mapDbAppointment(r: Row, departmentName?: string): Appointment {
+  return {
+    id: String(r.id),
+    hospitalId: String(r.hospital_id),
+    patientId: String(r.patient_id),
+    departmentId: departmentName ?? String(r.department_id),
+    sessionId: String(r.slot_id),
+    scheduledFor: String(r.scheduled_for ?? r.created_at),
+    status: fromDbStatus(String(r.status)),
+    completedAt: r.status === 'completed' ? String(r.created_at) : null,
+    reason: null,
+    requestedAt: String(r.created_at),
+    version: Number(r.version ?? 1),
+  };
 }
 
 export const liveRepo: Repo = {
   ...demoRepo,
   kind: 'supabase',
+
+  /**
+   * Book against a REAL slot, through the database's own RPC.
+   *
+   * `book_appointment` is SECURITY DEFINER and does the work that must not
+   * be trusted to application code: it locks the department, re-checks
+   * capacity and booking_open, enforces an idempotency key, and writes the
+   * appointment and its event in one transaction.
+   *
+   * This previously wrote to a JSON file. On a read-only filesystem that
+   * write was swallowed, so a patient saw a confirmation for an appointment
+   * that existed only in one server instance's memory and vanished on the
+   * next request. Failing loudly is better than appearing to succeed.
+   */
+  async requestAppointment(input) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('BOOKING_UNAVAILABLE');
+
+    const { data: auth } = await sb.auth.getUser();
+    if (!auth?.user) throw new Error('AUTH_REQUIRED');
+
+    const name =
+      (auth.user.user_metadata?.full_name as string | undefined)?.trim() ||
+      auth.user.email ||
+      'Patient';
+
+    const { data, error } = await sb.rpc('book_appointment', {
+      p_slot: input.sessionId,
+      p_name: name.slice(0, 120),
+      p_key: idempotencyKey(['book', input.sessionId, auth.user.id]),
+    });
+
+    if (error) {
+      // The RPC raises these by name; pass them through so the route can
+      // answer 404/409 rather than a generic 500.
+      const m = String(error.message ?? '');
+      if (/NOT_FOUND/.test(m)) throw new Error('NOT_FOUND');
+      if (/BOOKING_CLOSED/.test(m)) throw new Error('BOOKING_CLOSED');
+      if (/CAPACITY_FULL/.test(m)) throw new Error('CAPACITY_FULL');
+      if (/AUTH_REQUIRED/.test(m)) throw new Error('AUTH_REQUIRED');
+      throw new Error(m || 'BOOKING_FAILED');
+    }
+
+    const row = (Array.isArray(data) ? data[0] : data) as Row;
+    if (!row?.id) throw new Error('BOOKING_FAILED');
+    return mapDbAppointment(row);
+  },
+
+  async listAppointments({ patientId, hospitalId }) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) return [];
+    let qb = sb.from('appointments').select('*').order('created_at', { ascending: false });
+    // RLS already scopes these; the filters narrow, they do not authorise.
+    if (patientId) qb = qb.eq('patient_id', patientId);
+    if (hospitalId) qb = qb.eq('hospital_id', hospitalId);
+    const { data, error } = await qb;
+    if (error || !data) return [];
+    return data.map((r) => mapDbAppointment(r as Row));
+  },
+
+  async getAppointment(id) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) return null;
+    const { data, error } = await sb.from('appointments').select('*').eq('id', id).maybeSingle();
+    if (error || !data) return null;
+    return mapDbAppointment(data as Row);
+  },
+
+  /**
+   * Hospital and patient decisions, through `transition_appointment`.
+   *
+   * Authorisation is the database's: the RPC derives the hospital from the
+   * appointment itself and calls private.require_permission, so a forged
+   * hospital id in a request body changes nothing. Optimistic concurrency
+   * is its `p_version`.
+   *
+   * Two app actions have no database equivalent — answering a reschedule
+   * proposal — because this schema has no "proposed" state. Rather than
+   * invent one, those are refused here.
+   */
+  async transitionAppointment(input) {
+    const action = input.action as Action;
+    const dbAction = toDbAction(action);
+    if (!dbAction || !isPersistable(action)) throw new Error('UNSUPPORTED_TRANSITION');
+
+    /*
+     * The decline reason cannot be stored.
+     *
+     * transition_appointment takes (p_action, p_id, p_version, p_key,
+     * p_slot) and the appointments table has no reason column, so a reason
+     * collected by the UI has nowhere to go in this schema. It is dropped
+     * here rather than silently appearing to save: the patient-facing copy
+     * must not promise an explanation the database never received.
+     *
+     * Storing it needs a migration — either a column or a row in
+     * appointment_events.details — and that has not been made yet.
+     */
+
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('BOOKING_UNAVAILABLE');
+
+    const { data, error } = await sb.rpc('transition_appointment', {
+      p_action: dbAction,
+      p_id: input.appointmentId,
+      p_version: input.expectedVersion ?? null,
+      p_key: idempotencyKey([dbAction, input.appointmentId, input.expectedVersion ?? 0]),
+      p_slot: dbAction === 'reschedule' ? input.proposedSessionId ?? null : null,
+    });
+
+    if (error) {
+      /*
+       * mutate_appointment raises exactly nine named codes. Mapping only
+       * some of them meant a VERSION_CONFLICT arrived as an unmatched
+       * message and surfaced to the user as HTTP 500 "Something went
+       * wrong" — a raw failure for a condition the product has a precise
+       * answer to. The full set is handled, and anything genuinely
+       * unrecognised is still not reported as the caller's fault.
+       */
+      const m = String(error.message ?? '');
+      const known = [
+        'VERSION_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'NOT_FOUND',
+        'CAPACITY_FULL', 'CONSULTATION_FULL', 'BOOKING_CLOSED',
+        'INVALID_TRANSITION', 'POLICY_NOT_CONFIGURED', 'INVALID_INPUT',
+      ] as const;
+      for (const code of known) {
+        if (m.includes(code)) throw new Error(code);
+      }
+      if (/permission|denied|not authori/i.test(m)) throw new Error('FORBIDDEN');
+      throw new Error('TRANSITION_FAILED');
+    }
+
+    const row = (Array.isArray(data) ? data[0] : data) as Row;
+    if (!row?.id) throw new Error('NOT_FOUND');
+    return mapDbAppointment(row);
+  },
+
+  async listAppointmentEvents(appointmentId) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) return [];
+    const { data, error } = await sb
+      .from('appointment_events')
+      .select('id, appointment_id, actor_id, action, version, occurred_at, details')
+      .eq('appointment_id', appointmentId)
+      .order('occurred_at', { ascending: true });
+    if (error || !data) return [];
+    return data.map((e) => {
+      const details = (e.details ?? {}) as Record<string, unknown>;
+      return {
+        id: String(e.id),
+        appointmentId: String(e.appointment_id),
+        action: String(e.action),
+        fromStatus: (details.from as string | undefined) ?? null,
+        toStatus: (details.to as string | undefined) ?? String(e.action),
+        actorSide: (String(e.action) === 'book' ? 'patient' : 'hospital') as 'patient' | 'hospital',
+        actorRole: 'staff',
+        actorId: e.actor_id ? String(e.actor_id) : null,
+        reason: (details.reason as string | undefined) ?? null,
+        createdAt: String(e.occurred_at),
+      };
+    });
+  },
 
   async listHospitals() {
     return loadHospitals();
@@ -276,19 +476,17 @@ export const liveRepo: Repo = {
     return all.find((h) => h.id === idOrSlug || h.slug === idOrSlug) ?? null;
   },
 
+  /**
+   * Real slots, with seats already counted from real appointments.
+   *
+   * Seat usage used to be topped up from a JSON file of pending requests.
+   * That file is unwritable on a serverless host, so the count was wrong
+   * wherever it mattered most. realSessions() derives it from the
+   * appointments table instead, and the database enforces capacity anyway
+   * when a booking is actually attempted.
+   */
   async listSessions(hospitalIds?: string[]) {
-    const all = await sessions();
-    const taken = new Map<string, number>();
-    for (const r of readRequests()) taken.set(r.sessionId, (taken.get(r.sessionId) ?? 0) + 1);
-    const adjusted = all.map((s) => {
-      const extra = taken.get(s.id) ?? 0;
-      if (!extra) return s;
-      const booked = Math.min(s.capacity, s.booked + extra);
-      return { ...s, booked, status: booked >= s.capacity ? ('full' as const) : s.status };
-    });
-    if (!hospitalIds) return adjusted;
-    const set = new Set(hospitalIds);
-    return adjusted.filter((s) => set.has(s.hospitalId));
+    return realSessions(hospitalIds);
   },
 
   /** No queue snapshots exist in the live project; report none rather than invent one. */
@@ -301,68 +499,7 @@ export const liveRepo: Repo = {
     return [];
   },
 
-  async listAppointments({ patientId }) {
-    const all = await sessions();
-    const rows = readRequests()
-      .filter((r) => !patientId || r.patientId === patientId)
-      // A stored request whose generated session has rolled out of the
-      // 14-day window is dropped rather than rendered against a guessed slot.
-      .filter((r) => all.some((x) => x.id === r.sessionId))
-      .map((r) => {
-        const s = all.find((x) => x.id === r.sessionId)!;
-        return {
-          id: `apt-${r.sessionId}`,
-          hospitalId: s.hospitalId,
-          patientId: r.patientId,
-          departmentId: s.departmentId,
-          sessionId: s.id,
-          scheduledFor: `${s.date}T${s.startTime}:00`,
-          status: 'requested' as const,
-          completedAt: null,
-          reason: r.reason,
-          requestedAt: r.at,
-        };
-      });
-    return rows;
-  },
 
-  async getAppointment(id: string) {
-    const rows = await liveRepo.listAppointments({});
-    return rows.find((a) => a.id === id) ?? null;
-  },
-
-  async requestAppointment(input) {
-    const all = await sessions();
-    const session = all.find((s) => s.id === input.sessionId);
-    if (!session) throw new Error('NOT_FOUND');
-    const rows = readRequests();
-    const taken = rows.filter((r) => r.sessionId === session.id).length;
-    if (session.booked + taken >= session.capacity) throw new Error('CAPACITY_FULL');
-    const already = rows.find(
-      (r) => r.sessionId === session.id && r.patientId === input.patientId,
-    );
-    if (!already) {
-      rows.push({
-        sessionId: session.id,
-        patientId: input.patientId,
-        reason: input.reason ?? null,
-        at: new Date().toISOString(),
-      });
-      writeRequests(rows);
-    }
-    return {
-      id: `apt-${session.id}`,
-      hospitalId: session.hospitalId,
-      patientId: input.patientId,
-      departmentId: session.departmentId,
-      sessionId: session.id,
-      scheduledFor: `${session.date}T${session.startTime}:00`,
-      status: 'requested',
-      completedAt: null,
-      reason: input.reason ?? null,
-      requestedAt: new Date().toISOString(),
-    };
-  },
 };
 
 /** Counts shown in the banner so the claim "live" is specific and checkable. */

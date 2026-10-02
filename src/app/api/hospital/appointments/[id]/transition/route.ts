@@ -87,10 +87,27 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return fail(status, e.message, { code: e.code });
     }
     if (e instanceof Error) {
-      if (e.message === 'NOT_FOUND') return fail(404, 'That appointment could not be found.');
-      if (e.message === 'CAPACITY_FULL') {
-        return fail(409, 'That session is now full. Choose another time.', { code: 'CAPACITY_FULL' });
-      }
+      /*
+       * The database raises these by name. Each gets the status and the
+       * sentence that matches it — a stale write is a 409 the user can act
+       * on by reloading, not a 500 that tells them nothing.
+       */
+      const byCode: Record<string, [number, string]> = {
+        NOT_FOUND: [404, 'That appointment could not be found.'],
+        VERSION_CONFLICT: [409, 'Somebody else updated this appointment. Reload and try again.'],
+        IDEMPOTENCY_CONFLICT: [409, 'That looks like a repeat of a different change. Reload and try again.'],
+        CAPACITY_FULL: [409, 'That session is now full. Choose another time.'],
+        CONSULTATION_FULL: [409, 'That consultation is full. Choose another time.'],
+        BOOKING_CLOSED: [409, 'Booking is closed for that session.'],
+        INVALID_TRANSITION: [422, 'That change is not allowed from the current status.'],
+        POLICY_NOT_CONFIGURED: [409, 'This hospital has not configured that policy yet.'],
+        INVALID_INPUT: [400, 'That request was not valid.'],
+        UNSUPPORTED_TRANSITION: [422, 'That action cannot be recorded against the live database yet.'],
+        FORBIDDEN: [403, 'You do not have permission to do that.'],
+        AUTH_REQUIRED: [401, 'Sign in to continue.'],
+      };
+      const hit = byCode[e.message];
+      if (hit) return fail(hit[0], hit[1], { code: e.message });
     }
     return handleError(e);
   }

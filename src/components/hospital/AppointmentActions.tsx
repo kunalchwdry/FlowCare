@@ -129,7 +129,11 @@ export function AppointmentActions({
           {actionNeedsReason(open) && (
             <label className="mt-2 block">
               <span className="text-[11px] font-semibold text-ink-700">
-                Reason — the patient sees this
+                Reason
+              </span>
+              <span className="mt-0.5 block text-[10px] text-amber-800">
+                Not stored yet against the live database — this schema has no field
+                for it. Please also tell the patient directly.
               </span>
               <textarea
                 value={reason}
