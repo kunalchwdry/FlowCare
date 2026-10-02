@@ -20,16 +20,38 @@ type CookieToSet = { name: string; value: string; options?: Record<string, unkno
  */
 
 /** Areas that are meaningless to a signed-out visitor. */
-const SIGNED_IN_AREAS = ['/patient', '/staff'] as const;
+const SIGNED_IN_AREAS = ['/patient', '/staff', '/hospital'] as const;
 /** ...except the doors into them. */
 const PUBLIC_AUTH_PATHS = [
   '/patient/login', '/patient/signup', '/staff/login', '/staff/register',
+  '/hospital/login',
 ];
+
+/**
+ * Hostnames that should land on the hospital portal instead of the patient
+ * app. Comma-separated, set per deployment:
+ *
+ *   HOSPITAL_HOSTS=hospital.flowcare.in,staff.flowcare.in
+ *
+ * A bare `hospital.` prefix is also honoured so a new environment works
+ * without configuration. Matching is on the host header only — never on
+ * anything the page can influence.
+ */
+function isHospitalHost(host: string): boolean {
+  const bare = host.split(':')[0].toLowerCase();
+  const configured = (process.env.HOSPITAL_HOSTS ?? '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean);
+  if (configured.includes(bare)) return true;
+  return bare.startsWith('hospital.') || bare.startsWith('staff.');
+}
 
 function signedInDoorFor(pathname: string): string | null {
   if (PUBLIC_AUTH_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return null;
   const area = SIGNED_IN_AREAS.find((a) => pathname === a || pathname.startsWith(`${a}/`));
   if (!area) return null;
+  if (area === '/hospital') return '/hospital/login';
   return area === '/staff' ? '/staff/login' : '/patient/login';
 }
 
@@ -44,11 +66,50 @@ function hasAnyCredential(request: NextRequest): boolean {
 }
 
 export async function middleware(request: NextRequest) {
+  /*
+   * One deployment, two front doors.
+   *
+   * On a hospital hostname every path is served from under /hospital. This
+   * is a rewrite, not a redirect: the visitor keeps seeing
+   * hospital.example.com/appointments while Next renders
+   * /hospital/appointments. Hospitals get their own address without a second
+   * application, a second auth system or a second copy of the state machine.
+   *
+   * /api is deliberately excluded. The routes are shared by both sides and
+   * already authorise per request; rewriting them would mean the same
+   * endpoint had two paths depending on which hostname called it.
+   */
+  const host = request.headers.get('host') ?? '';
+  const { pathname } = request.nextUrl;
+  if (
+    isHospitalHost(host) &&
+    !pathname.startsWith('/hospital') &&
+    !pathname.startsWith('/api') &&
+    !pathname.startsWith('/_next')
+  ) {
+    const to = request.nextUrl.clone();
+    to.pathname = `/hospital${pathname === '/' ? '' : pathname}`;
+    return NextResponse.rewrite(to);
+  }
+
   const door = signedInDoorFor(request.nextUrl.pathname);
   if (door && !hasAnyCredential(request)) {
     const to = request.nextUrl.clone();
-    to.pathname = door;
-    to.search = `?next=${encodeURIComponent(request.nextUrl.pathname)}`;
+    /*
+     * On a hospital hostname the /hospital prefix is an implementation
+     * detail of the rewrite, so it must not surface in a redirect: the
+     * visitor should see hospital.example.com/login, not
+     * hospital.example.com/hospital/login. The `next` value is stripped the
+     * same way, otherwise sign-in would bounce them to a doubled path.
+     */
+    const onHospitalHost = isHospitalHost(request.headers.get('host') ?? '');
+    const strip = (path: string) =>
+      onHospitalHost && path.startsWith('/hospital')
+        ? path.slice('/hospital'.length) || '/'
+        : path;
+
+    to.pathname = strip(door);
+    to.search = `?next=${encodeURIComponent(strip(request.nextUrl.pathname))}`;
     return NextResponse.redirect(to);
   }
 

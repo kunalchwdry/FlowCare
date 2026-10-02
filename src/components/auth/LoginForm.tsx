@@ -12,7 +12,18 @@ import {
  * and what the page says — it is never sent to the server as a claim,
  * because the server decides your role from your account, not from a form.
  */
-export function LoginForm({ role }: { role: 'patient' | 'staff' }) {
+export function LoginForm({
+  role,
+  next,
+}: {
+  role: 'patient' | 'staff';
+  /**
+   * Where to land after signing in. The hospital portal passes its own
+   * destination so staff are not bounced through the patient dashboard on
+   * the way to work.
+   */
+  next?: string;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -45,7 +56,12 @@ export function LoginForm({ role }: { role: 'patient' | 'staff' }) {
       // in through the staff door with a patient account, send them to the
       // patient area rather than a permission error.
       const actual = j?.data?.user?.role ?? 'patient';
-      router.push(actual === 'patient' ? '/patient' : '/staff');
+      // `actual` is the role the SERVER resolved, not the door that was
+      // used: signing in at the hospital entrance with a patient account
+      // still lands on the patient side rather than a portal that would
+      // refuse every page.
+      const fallback = actual === 'patient' ? '/patient' : '/staff';
+      router.push(next && actual !== 'patient' ? next : fallback);
       router.refresh();
     } catch {
       setFormError('We could not reach FlowCare. Check your connection and try again.');
