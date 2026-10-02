@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { createClaim, storageIsDurable } from '@/lib/hospital/claims';
+import { dnsToken, planVerification } from '@/lib/hospital/verification';
 import { getRepo } from '@/lib/data';
 import { fail, handleError, ok, readJson } from '@/lib/http';
 import { clientKey, rateLimit } from '@/lib/ratelimit';
@@ -51,11 +52,15 @@ export async function POST(req: NextRequest) {
     // If a hospital id is named it has to be real — otherwise a claim could
     // be filed against an id that does not exist and sit in the queue.
     let hospitalName: string | null = null;
+    let verification: ReturnType<typeof planVerification> | null = null;
     if (body.hospitalId) {
       const repo = await getRepo();
       const hospital = await repo.getHospital(body.hospitalId);
       if (!hospital) return fail(404, 'That hospital is not listed on FlowCare.');
       hospitalName = hospital.name;
+      // Computed from what FlowCare already holds about the facility, not
+      // from anything in this request body.
+      verification = planVerification(hospital, body.contactEmail);
     }
 
     const { claim, duplicate } = await createClaim({
@@ -67,6 +72,7 @@ export async function POST(req: NextRequest) {
       contactPhone: body.contactPhone ?? null,
       statedRole: body.statedRole,
       evidenceNote: body.evidenceNote ?? null,
+      emailDomainMatches: verification?.emailDomainMatches ?? null,
     });
 
     return ok({
@@ -77,6 +83,22 @@ export async function POST(req: NextRequest) {
         createdAt: claim.createdAt,
       },
       duplicate,
+      /*
+       * What happens next, concretely. Returned so the claimant can start
+       * the strongest route immediately rather than waiting to be told.
+       * The TXT token is safe to publish: it proves control of a domain
+       * only when it appears IN that domain's DNS.
+       */
+      verification: verification
+        ? {
+            hospitalDomain: verification.hospitalDomain,
+            emailDomainMatches: verification.emailDomainMatches,
+            routes: verification.routes,
+            dnsRecord: verification.hospitalDomain
+              ? { host: verification.hospitalDomain, type: 'TXT', value: dnsToken(claim.id) }
+              : null,
+          }
+        : null,
       // Said plainly rather than implied, and never "we have emailed you":
       // no mail provider is configured on this deployment.
       durable: storageIsDurable(),
