@@ -8,6 +8,7 @@
  * caller's own membership row and is never read from a query string, a body,
  * or a header.
  */
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { getSession, type SessionUser } from '@/lib/auth/session';
 
@@ -96,9 +97,31 @@ function permissionsFor(user: SessionUser): HospitalPermission[] {
  * to a login page they already passed tells them nothing. They get a page
  * explaining where their request stands.
  */
+/**
+ * Strip the /hospital prefix when the request arrived on a hospital
+ * hostname.
+ *
+ * On hospital.example.com the prefix is an implementation detail of the
+ * middleware rewrite. Leaving it in a redirect produces
+ * hospital.example.com/hospital/login, which looks like a bug and breaks
+ * the illusion that this is simply the hospital's own site.
+ */
+async function publicPath(path: string): Promise<string> {
+  const host = (await headers()).get('host')?.split(':')[0].toLowerCase() ?? '';
+  const configured = (process.env.HOSPITAL_HOSTS ?? '')
+    .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean);
+  const onHospitalHost =
+    configured.includes(host) || host.startsWith('hospital.') || host.startsWith('staff.');
+  if (!onHospitalHost || !path.startsWith('/hospital')) return path;
+  return path.slice('/hospital'.length) || '/';
+}
+
 export async function requireHospital(next = '/hospital'): Promise<HospitalGate> {
   const user = await getSession();
-  if (!user) redirect(`/hospital/login?next=${encodeURIComponent(next)}`);
+  if (!user) {
+    const door = await publicPath('/hospital/login');
+    redirect(`${door}?next=${encodeURIComponent(await publicPath(next))}`);
+  }
   if (user.role !== 'staff' && user.role !== 'admin') {
     return { kind: 'no-membership', user };
   }
