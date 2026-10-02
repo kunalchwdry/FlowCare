@@ -177,14 +177,16 @@ export const demoRepo: Repo = {
   },
 
   async listAppointments({ patientId, hospitalId }): Promise<Appointment[]> {
-    let rows: Appointment[] = [...SEED.appointments, ...load().appointments];
+    // Copies throughout: callers must not be able to write into repo state.
+    let rows: Appointment[] = [...SEED.appointments, ...load().appointments].map((a) => ({ ...a }));
     if (patientId) rows = rows.filter((a) => a.patientId === patientId);
     if (hospitalId) rows = rows.filter((a) => a.hospitalId === hospitalId);
     return rows;
   },
 
   async getAppointment(id: string): Promise<Appointment | null> {
-    return [...SEED.appointments, ...load().appointments].find((a) => a.id === id) ?? null;
+    const found = [...SEED.appointments, ...load().appointments].find((a) => a.id === id);
+    return found ? { ...found } : null;
   },
 
   /**
@@ -217,10 +219,24 @@ export const demoRepo: Repo = {
       completedAt: null,
       reason: input.reason ?? null,
       requestedAt: new Date().toISOString(),
+      // Explicit from the start. Leaving it undefined meant the first
+      // transition jumped straight to 2, and every caller had to guess
+      // what "no version" meant.
+      version: 1,
     };
     s.appointments.push(appointment);
     save();
-    return appointment;
+    /*
+     * A copy, not the stored object.
+     *
+     * Returning the live row let a later mutation reach back into the
+     * caller's value: once a transition bumped `version`, a reference
+     * handed out earlier appeared to hold the NEW version, so an
+     * optimistic-concurrency check comparing against it silently passed
+     * and the conflict surfaced as an unrelated illegal-transition error.
+     * A stale read has to stay stale — that is the whole mechanism.
+     */
+    return { ...appointment };
   },
 
   /**
