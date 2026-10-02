@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { FlowCareMark } from '@/components/Brand';
 import { LoginForm } from '@/components/auth/LoginForm';
 import { getSession } from '@/lib/auth/session';
 
@@ -13,11 +12,11 @@ export const metadata = {
 /**
  * The staff front door.
  *
- * Same credentials and the same Supabase auth as the patient app — this is
- * a different entrance to one building, not a second account system. What
- * differs is only where you land afterwards and the explanation around the
- * form, because somebody arriving here is at work rather than looking for
- * care.
+ * LoginForm renders the whole AuthShell — grid, card, logo, heading and the
+ * fixed-width side panel. This page previously wrapped it in a max-w-md
+ * container, which crushed that entire two-column layout into 448px and
+ * drew a second logo and heading above it. The shell owns its own width;
+ * anything extra belongs beside it, not around it.
  */
 export default async function HospitalLogin({
   searchParams,
@@ -33,23 +32,12 @@ export default async function HospitalLogin({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-ink-50 px-4 py-12">
-      <div className="w-full max-w-md">
-        <div className="mb-6 text-center">
-          <FlowCareMark size={40} className="mx-auto text-brand-600" />
-          <h1 className="mt-4 text-2xl font-bold text-ink-900">Hospital portal</h1>
-          <p className="mt-2 text-sm text-ink-600">
-            Sign in to manage appointment requests, your queue and your hospital’s published
-            information.
-          </p>
-        </div>
+    <main className="mx-auto w-full max-w-5xl px-4 pb-12">
+      <LoginForm role="staff" next={next ?? '/hospital'} />
 
-        <div className="rounded-2xl border border-ink-200 bg-white p-6 shadow-sm">
-          <LoginForm role="staff" next={next ?? '/hospital'} />
-        </div>
-
-        <div className="mt-5 rounded-xl border border-ink-200 bg-white p-4">
-          <p className="text-sm font-semibold text-ink-800">Don’t have access yet?</p>
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl border border-ink-200 bg-white p-4">
+          <p className="text-sm font-semibold text-ink-900">Work here but have no access?</p>
           <p className="mt-1 text-sm text-ink-600">
             Request it, and an administrator at your hospital approves you. Access is never
             granted automatically — that approval is what stops anyone who can create an account
@@ -63,28 +51,16 @@ export default async function HospitalLogin({
           </Link>
         </div>
 
-        {/* The other situation: nobody at this hospital is on FlowCare yet,
-            so there is no administrator to ask. That needs its own door. */}
-        <div className="mt-4 rounded-xl border border-brand-200 bg-brand-50 p-4">
-          <p className="text-sm font-semibold text-ink-900">Is your hospital not on FlowCare yet?</p>
+        <div className="rounded-xl border border-brand-200 bg-brand-50 p-4">
+          <p className="text-sm font-semibold text-ink-900">Hospital not on FlowCare yet?</p>
           <p className="mt-1 text-sm text-ink-700">
             If nobody from your hospital manages its listing, claim it. A reviewer verifies the
             claim before any access is granted.
           </p>
-          <Link
-            href="/hospital/register"
-            className="mt-3 inline-flex fc-btn-primary !py-2 text-sm"
-          >
+          <Link href="/hospital/register" className="mt-3 inline-flex fc-btn-primary !py-2 text-sm">
             Register your hospital
           </Link>
         </div>
-
-        <p className="mt-6 text-center text-xs text-ink-500">
-          Looking for care rather than working here?{' '}
-          <Link href="/patient/login" className="font-semibold text-brand-700 underline underline-offset-2">
-            Patient sign in
-          </Link>
-        </p>
       </div>
     </main>
   );
