@@ -28,12 +28,12 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/hospital', label: 'Dashboard', ready: true },
   { href: '/hospital/appointments', label: 'Appointments', needs: 'appointments:read', ready: true },
-  { href: '/hospital/queue', label: 'Queue', needs: 'queue:read' },
-  { href: '/hospital/patients', label: 'Patients', needs: 'appointments:read' },
-  { href: '/hospital/reviews', label: 'Reviews', needs: 'reviews:moderate' },
-  { href: '/hospital/analytics', label: 'Analytics', needs: 'appointments:read' },
-  { href: '/hospital/profile', label: 'Hospital profile', needs: 'facts:manage' },
-  { href: '/hospital/staff', label: 'Staff', needs: 'memberships:manage' },
+  { href: '/hospital/queue', label: 'Queue', needs: 'queue:read', ready: true },
+  { href: '/hospital/patients', label: 'Patients', needs: 'appointments:read', ready: true },
+  { href: '/hospital/reviews', label: 'Reviews', needs: 'reviews:moderate', ready: true },
+  { href: '/hospital/analytics', label: 'Analytics', needs: 'appointments:read', ready: true },
+  { href: '/hospital/profile', label: 'Hospital profile', needs: 'facts:manage', ready: true },
+  { href: '/hospital/staff', label: 'Staff', needs: 'memberships:manage', ready: true },
 ];
 
 export function HospitalShell({

@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { FlowCareMark } from '@/components/Brand';
+import { HospitalShell } from '@/components/hospital/HospitalShell';
+import type { HospitalActor, HospitalPermission } from '@/lib/auth/hospital';
 import type { SessionUser } from '@/lib/auth/session';
 
 /**
- * Signed in, but no active membership.
+ * Signed in, but no active membership anywhere.
  *
  * Deliberately not a redirect to the login page. This person has an account
  * and has already signed in; bouncing them back to a form they just
@@ -37,5 +39,43 @@ export function PendingState({ user }: { user: SessionUser }) {
         </Link>
       </div>
     </main>
+  );
+}
+
+/**
+ * Signed in, correct hospital, but missing the permission this page needs.
+ *
+ * Shown inside the portal rather than as a redirect: the person belongs
+ * here, they simply cannot open this one screen. Naming the missing
+ * permission lets them ask their administrator for the right thing rather
+ * than reporting "it does not work".
+ */
+export function NoPermission({
+  actor,
+  needs,
+  active,
+  title,
+  hospitalName = 'Your hospital',
+}: {
+  actor: HospitalActor;
+  needs: HospitalPermission | string;
+  active: string;
+  title: string;
+  hospitalName?: string;
+}) {
+  return (
+    <HospitalShell actor={actor} hospitalName={hospitalName} active={active} title={title}>
+      <div className="rounded-xl border border-ink-200 bg-white p-6">
+        <p className="text-sm font-semibold text-ink-800">You do not have access to this page</p>
+        <p className="mt-1 text-sm text-ink-600">
+          It needs the{' '}
+          <code className="rounded bg-ink-100 px-1 py-0.5 font-mono text-xs">{needs}</code>{' '}
+          permission. A manager at your hospital can grant it from the Staff page.
+        </p>
+        <p className="mt-3 text-xs text-ink-500">
+          This is enforced by the server on every request, not by hiding the link.
+        </p>
+      </div>
+    </HospitalShell>
   );
 }
