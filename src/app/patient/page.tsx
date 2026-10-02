@@ -8,6 +8,7 @@ import {
   IconCalendar, IconCompare, IconHeart, IconSearch, IconSparkles,
 } from '@/components/Icons';
 import type { Appointment, Hospital } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 export const metadata: Metadata = { title: 'Your dashboard — FlowCare' };
 export const dynamic = 'force-dynamic';
@@ -36,12 +37,7 @@ function greeting(d = new Date()): string {
 }
 
 function when(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('en-IN', {
-    weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
-    timeZone: 'Asia/Kolkata',
-  });
+  return formatDateTime(iso);
 }
 
 const QUICK = [

@@ -5,6 +5,7 @@ import { getRepo } from '@/lib/data';
 import { getSession } from '@/lib/auth/session';
 import { label } from '@/lib/discovery/filters';
 import { IconCalendar } from '@/components/Icons';
+import { formatDateTime } from '@/lib/time';
 
 export const metadata: Metadata = {
   title: 'Appointment request · FlowCare',
@@ -69,9 +70,7 @@ export default async function AppointmentReceiptPage({
         <p className="mt-0.5 text-sm text-ink-600">{hospital?.addressLine}</p>
         <p className="mt-3 flex items-center gap-1.5 text-sm font-semibold">
           <IconCalendar width={15} height={15} className="text-brand-600" />
-          {when.toLocaleString(undefined, {
-            weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
-          })}
+          {formatDateTime(when)}
         </p>
         <p className="mt-0.5 text-xs text-ink-500">
           {label(appointment.departmentId.split(':dept:')[1] ?? '')} · reference{' '}

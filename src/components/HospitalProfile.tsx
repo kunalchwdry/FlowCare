@@ -19,6 +19,7 @@ import type { FacilityFactsView } from '@/lib/journey/factsView';
 import { label } from '@/lib/discovery/filters';
 import { pushRecentlyViewed, trackEvent, useCompareBasket, useSessionId } from '@/lib/client/hooks';
 import type { DiscoveryResult, HospitalReview, FlowCareRatingSummary } from '@/lib/types';
+import { formatDate, formatDateTime, formatTime } from '@/lib/time';
 
 interface Detail extends Omit<DiscoveryResult, 'match'> {
   ratingExplanation: string;
@@ -196,7 +197,7 @@ export function HospitalProfile({ id }: { id: string }) {
               <SourceTag source="flowcare" />
             </div>
             <p className="mt-1 text-xs text-ink-500">
-              Held and verified by FlowCare. Availability snapshot computed {new Date(d.availability.computedAt).toLocaleString()}.
+              Held and verified by FlowCare. Availability snapshot computed {formatDateTime(d.availability.computedAt)}.
             </p>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -211,7 +212,7 @@ export function HospitalProfile({ id }: { id: string }) {
                 title="Queue information"
                 value={
                   d.queue?.published && d.queue.medianWaitMinutes !== null
-                    ? `~${d.queue.medianWaitMinutes} min median wait · ${d.queue.waitingCount} waiting (as of ${d.queue.observedAt ? new Date(d.queue.observedAt).toLocaleTimeString() : 'unknown'})`
+                    ? `~${d.queue.medianWaitMinutes} min median wait · ${d.queue.waitingCount} waiting (as of ${d.queue.observedAt ? formatTime(d.queue.observedAt) : 'unknown'})`
                     : 'This hospital does not publish live queue information'
                 }
               />
@@ -366,7 +367,7 @@ export function HospitalProfile({ id }: { id: string }) {
                 </div>
 
                 <p className="mt-3 text-[11px] text-ink-400">
-                  Retrieved from Google {new Date(ext.fetchedAt).toLocaleString()}. FlowCare does not store this content.
+                  Retrieved from Google {formatDateTime(ext.fetchedAt)}. FlowCare does not store this content.
                 </p>
               </>
             )}
@@ -400,7 +401,7 @@ export function HospitalProfile({ id }: { id: string }) {
               <Row k="Beds" v={h.bedCount ? String(h.bedCount) : 'Not recorded'} />
               <Row k="Emergency services" v={h.emergencyServices ? 'Yes' : 'No'} />
               <Row k="Languages" v={h.languages.map(label).join(', ')} />
-              <Row k="Onboarded" v={h.onboardedAt ? new Date(h.onboardedAt).toLocaleDateString() : 'Not yet'} />
+              <Row k="Onboarded" v={h.onboardedAt ? formatDate(h.onboardedAt) : 'Not yet'} />
             </dl>
             {h.accessibility.length > 0 && (
               <div className="mt-3">

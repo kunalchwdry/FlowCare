@@ -2,6 +2,7 @@
 
 import { IconAccessible, IconCheck, IconClock, IconInfo, IconStar } from './Icons';
 import type { AvailabilityState, FlowCareRatingSummary } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 const AVAIL: Record<AvailabilityState, { text: string; cls: string }> = {
   available: { text: 'Appointments available', cls: 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200' },
@@ -15,7 +16,7 @@ export function AvailabilityPill({
 }: { state: AvailabilityState; nextDate?: string | null; computedAt?: string; compact?: boolean }) {
   const a = AVAIL[state];
   return (
-    <span className={`fc-pill ${a.cls}`} title={computedAt ? `FlowCare session data checked ${new Date(computedAt).toLocaleString()}` : undefined}>
+    <span className={`fc-pill ${a.cls}`} title={computedAt ? `FlowCare session data checked ${formatDateTime(computedAt)}` : undefined}>
       <IconClock width={13} height={13} />
       {a.text}
       {!compact && nextDate && state !== 'none' && state !== 'unknown' && (

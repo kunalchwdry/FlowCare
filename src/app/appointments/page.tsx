@@ -3,6 +3,7 @@ import { getRepo } from '@/lib/data';
 import { CancelAppointment } from '@/components/appointments/CancelAppointment';
 import { getSession } from '@/lib/auth/session';
 import { IconCalendar, IconSearch } from '@/components/Icons';
+import { formatDate, formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'My visits — FlowCare' };
@@ -83,7 +84,7 @@ export default async function AppointmentsPage() {
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">{byId.get(a.hospitalId)?.name ?? a.hospitalId}</p>
                 <p className="text-[11px] text-ink-500">
-                  {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleString()}
+                  {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {formatDateTime(a.scheduledFor)}
                 </p>
                 {/*
                   * The hospital's decision, in the patient's words. The raw
@@ -104,7 +105,7 @@ export default async function AppointmentsPage() {
                 {a.status === 'reschedule_proposed' && (
                   <p className="text-[11px] font-medium text-amber-800">
                     {byId.get(a.hospitalId)?.name ?? 'The hospital'} proposed{' '}
-                    {a.proposedFor ? new Date(a.proposedFor).toLocaleString() : 'another time'}
+                    {a.proposedFor ? formatDateTime(a.proposedFor) : 'another time'}
                     {a.decisionReason ? ` — ${a.decisionReason}` : ''}
                   </p>
                 )}
@@ -155,7 +156,7 @@ export default async function AppointmentsPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{h?.name ?? a.hospitalId}</p>
                   <p className="text-[11px] text-ink-500">
-                    {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {new Date(a.scheduledFor).toLocaleDateString()}
+                    {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? 'Department'} · {formatDate(a.scheduledFor)}
                   </p>
                   {/* The hospital's stated reason, shown verbatim. A decline
                       with no explanation is worse than none at all. */}

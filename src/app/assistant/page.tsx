@@ -6,6 +6,7 @@ import { HospitalCard, type ResultWithEvidence } from '@/components/HospitalCard
 import { IconInfo, IconPin, IconSparkles } from '@/components/Icons';
 import { label } from '@/lib/discovery/filters';
 import { trackEvent, useGeolocation, useSessionId } from '@/lib/client/hooks';
+import { formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -243,7 +244,7 @@ export default function AssistantPage() {
             </div>
           )}
 
-          <p className="text-center text-[10px] text-ink-400">FlowCare data as of {new Date(data.computedAt).toLocaleString()}</p>
+          <p className="text-center text-[10px] text-ink-400">FlowCare data as of {formatDateTime(data.computedAt)}</p>
         </>
       )}
     </div>

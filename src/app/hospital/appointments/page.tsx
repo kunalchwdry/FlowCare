@@ -5,6 +5,7 @@ import { HospitalShell, StatusBadge } from '@/components/hospital/HospitalShell'
 import { PendingState } from '@/components/hospital/PendingState';
 import { AppointmentActions } from '@/components/hospital/AppointmentActions';
 import type { Appointment } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Appointments — FlowCare hospital portal' };
@@ -18,14 +19,9 @@ const TABS = [
   { id: 'closed', label: 'Cancelled & declined', match: ['cancelled', 'rejected', 'no_show'] },
 ] as const;
 
-function fmt(iso: string | null | undefined) {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('en-IN', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true,
-  });
-}
+// Clinic timezone, via the shared formatter. A local helper here is how
+// the UTC bug spread across pages in the first place.
+const fmt = (iso: string | null | undefined) => formatDateTime(iso);
 
 export default async function HospitalAppointments({
   searchParams,

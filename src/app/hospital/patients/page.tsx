@@ -3,14 +3,12 @@ import { getRepo } from '@/lib/data';
 import { HospitalShell, Stat, StatusBadge } from '@/components/hospital/HospitalShell';
 import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { summarisePatients } from '@/lib/hospital/portalData';
+import { formatDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Patients — FlowCare hospital portal' };
 
-const d = (iso: string) => {
-  const x = new Date(iso);
-  return Number.isNaN(x.getTime()) ? '—' : x.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-};
+const d = (iso: string) => formatDate(iso);
 
 /**
  * Patients, strictly in the context of appointments at THIS hospital.

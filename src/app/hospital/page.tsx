@@ -4,6 +4,7 @@ import { getRepo } from '@/lib/data';
 import { computeMetrics } from '@/lib/hospital/metrics';
 import { HospitalShell, Stat, NoData } from '@/components/hospital/HospitalShell';
 import { PendingState } from '@/components/hospital/PendingState';
+import { formatDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +36,7 @@ export default async function HospitalDashboard() {
       hospitalName={hospital?.name ?? 'Your hospital'}
       active="/hospital"
       title="Today"
-      subtitle={new Date().toLocaleDateString('en-IN', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      })}
+      subtitle={formatDate(new Date())}
       actions={
         needsAction > 0 ? (
           <Link href="/hospital/appointments?tab=pending" className="fc-btn-primary !py-2 text-sm">

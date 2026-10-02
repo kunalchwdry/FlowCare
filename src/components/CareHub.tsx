@@ -15,6 +15,7 @@ import { IconCalendar, IconCheck, IconInfo, IconPin } from './Icons';
 import { ACCESSIBILITY_COMPONENTS, FOLLOW_UP_TASK_TYPES, TRANSPORT_MODES } from '@/lib/journey/vocab';
 import { LANGUAGE_NAMES } from '@/lib/journey/factsView';
 import type { CareContext, FollowUpTask, VisitRecord } from '@/lib/types';
+import { formatDate } from '@/lib/time';
 
 interface HospitalLite { id: string; name: string }
 type Task = FollowUpTask & { hospitalName: string | null };
@@ -341,9 +342,7 @@ function FollowUpSection({
                   <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-600">
                     <IconCalendar width={12} height={12} />
                     {overdue ? 'Was due ' : 'Due '}
-                    {new Date(`${t.dueDate}T00:00:00`).toLocaleDateString('en-IN', {
-                      day: 'numeric', month: 'short', year: 'numeric',
-                    })}
+                    {formatDate(`${t.dueDate}T00:00:00`)}
                     {t.hospitalName && <> · <IconPin width={12} height={12} /> {t.hospitalName}</>}
                   </p>
                 </div>
@@ -508,9 +507,7 @@ function VisitsSection({
                   {v.hospitalName ?? v.hospitalId}
                 </p>
                 <p className="text-[11px] text-ink-500">
-                  {new Date(`${v.visitDate}T00:00:00`).toLocaleDateString('en-IN', {
-                    day: 'numeric', month: 'long', year: 'numeric',
-                  })}
+                  {formatDate(`${v.visitDate}T00:00:00`)}
                 </p>
               </div>
               <button

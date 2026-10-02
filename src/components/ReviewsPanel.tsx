@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { IconCheck, IconInfo, IconShield, IconStar } from './Icons';
 import { SourceTag } from './Badges';
 import type { FlowCareRatingSummary, HospitalReview } from '@/lib/types';
+import { formatDate } from '@/lib/time';
 
 const DIMENSIONS: Array<{ key: keyof HospitalReview['ratings']; label: string; hint: string }> = [
   { key: 'overall', label: 'Overall experience', hint: 'Your visit taken as a whole' },
@@ -211,7 +212,7 @@ function ReviewItem({ review }: { review: HospitalReview }) {
         </span>
         <span className="text-xs font-semibold text-ink-700">{review.authorHandle}</span>
         <span className="fc-pill bg-brand-50 text-brand-800">{review.ratings.overall}.0 ★</span>
-        <span className="ml-auto text-[10px] text-ink-400">{new Date(review.createdAt).toLocaleDateString()}</span>
+        <span className="ml-auto text-[10px] text-ink-400">{formatDate(review.createdAt)}</span>
       </div>
       {review.comment && <p className="mt-2 text-xs leading-relaxed text-ink-700">{review.comment}</p>}
       <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
@@ -278,7 +279,7 @@ function ReviewForm({
       <select className="fc-input mt-1" value={appointmentId} onChange={(e) => setAppointmentId(e.target.value)}>
         {appointments.map((a) => (
           <option key={a.id} value={a.id}>
-            {a.completedAt ? new Date(a.completedAt).toLocaleDateString() : new Date(a.scheduledFor).toLocaleDateString()} — {a.departmentId.split(':dept:')[1] ?? 'visit'}
+            {a.completedAt ? formatDate(a.completedAt) : formatDate(a.scheduledFor)} — {a.departmentId.split(':dept:')[1] ?? 'visit'}
           </option>
         ))}
       </select>

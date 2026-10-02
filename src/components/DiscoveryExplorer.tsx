@@ -14,6 +14,7 @@ import { IconClose, IconCompare, IconList, IconMap, IconSparkles } from './Icons
 import { filtersToSearchParams, type DiscoveryFilters } from '@/lib/discovery/filters';
 import { CITY_ANCHORS } from '@/lib/discovery/geo';
 import { trackEvent, useCompareBasket, useGeolocation, useRecentlyViewed, useSessionId } from '@/lib/client/hooks';
+import { formatTime } from '@/lib/time';
 
 type View = 'list' | 'map';
 
@@ -240,7 +241,7 @@ export function DiscoveryExplorer({ initialView = 'list' }: { initialView?: View
             </p>
             {data && (
               <p className="text-[11px] text-ink-400">
-                FlowCare data as of {new Date(data.computedAt).toLocaleTimeString()}
+                FlowCare data as of {formatTime(data.computedAt)}
               </p>
             )}
           </div>

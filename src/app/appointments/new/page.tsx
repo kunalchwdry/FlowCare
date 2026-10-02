@@ -4,6 +4,7 @@ import { computeAvailability } from '@/lib/discovery/availability';
 import { label } from '@/lib/discovery/filters';
 import { getSession } from '@/lib/auth/session';
 import { SlotPicker } from '@/components/SlotPicker';
+import { formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,7 +81,7 @@ export default async function NewAppointmentPage({
           Available sessions {department && <span className="text-ink-500">· {label(department)}</span>}
         </h2>
         <p className="mt-0.5 text-[11px] text-ink-500">
-          FlowCare session data, computed {new Date(availability.computedAt).toLocaleString()}.
+          FlowCare session data, computed {formatDateTime(availability.computedAt)}.
         </p>
         <div className="mt-3">
           <SlotPicker

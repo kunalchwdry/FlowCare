@@ -16,6 +16,7 @@ import { IconCheck, IconInfo } from './Icons';
 import { STATUS_LABELS } from '@/lib/journey/corrections';
 import { EVIDENCE_KINDS } from '@/lib/journey/vocab';
 import type { FacilityCorrection } from '@/lib/types';
+import { formatDateTime } from '@/lib/time';
 
 type Row = FacilityCorrection & { hospitalName: string | null };
 
@@ -109,7 +110,7 @@ export function CorrectionQueue() {
                   </p>
                   <p className="text-[11px] text-ink-500">
                     {c.fieldCode} · reported{' '}
-                    {new Date(c.createdAt).toLocaleString('en-IN')}
+                    {formatDateTime(c.createdAt)}
                   </p>
                 </div>
                 <span className="fc-pill bg-ink-100 text-ink-700 !text-[10.5px]">
@@ -140,7 +141,7 @@ export function CorrectionQueue() {
                   <div className="flex gap-2">
                     <dt className="w-24 shrink-0 font-semibold text-ink-500">Reviewed</dt>
                     <dd className="text-ink-800">
-                      {new Date(c.reviewedAt).toLocaleString('en-IN')}
+                      {formatDateTime(c.reviewedAt)}
                       {c.outcome && ` — ${c.outcome}`}
                     </dd>
                   </div>

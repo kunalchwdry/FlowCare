@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { IconCheck, IconInfo, IconPin } from './Icons';
+import { formatDateTime } from '@/lib/time';
 
 interface Card {
   generatedAt: string;
@@ -201,7 +202,7 @@ export function VisitCard({ hospitalId }: { hospitalId: string }) {
             {card.checklistNotice}
           </p>
           <p className="mt-1.5 text-[10px] text-ink-400">
-            Generated {new Date(card.generatedAt).toLocaleString('en-IN')}
+            Generated {formatDateTime(card.generatedAt)}
           </p>
         </footer>
       </article>

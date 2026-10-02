@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { formatTime } from '@/lib/time';
 
 interface ProviderInfo {
   id: string;
@@ -398,7 +399,7 @@ export function CheckResult({
       <p className="mt-0.5">{message}</p>
       <p className="mt-1 opacity-70">
         {model ? `Model: ${model} · ` : ''}
-        Checked {Number.isNaN(when.getTime()) ? checkedAt : when.toLocaleTimeString('en-IN')}
+        Checked {formatTime(checkedAt)}
       </p>
     </div>
   );

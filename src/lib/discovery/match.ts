@@ -16,6 +16,7 @@ import type {
 } from '@/lib/types';
 import type { DiscoveryFilters } from './filters';
 import { label } from './filters';
+import { formatDateTime } from '@/lib/time';
 
 export const MATCH_METHOD_VERSION = 'fc-match-v1';
 
@@ -83,7 +84,7 @@ export function computeMatch(
       evidence:
         availability.state === 'unknown'
           ? 'FlowCare has no session data for this hospital'
-          : `${label(availability.state)}${availability.nextAvailableDate ? ` — next slot ${availability.nextAvailableDate}` : ''} (checked ${new Date(availability.computedAt).toLocaleString()})`,
+          : `${label(availability.state)}${availability.nextAvailableDate ? ` — next slot ${availability.nextAvailableDate}` : ''} (checked ${formatDateTime(availability.computedAt)})`,
     });
   }
 

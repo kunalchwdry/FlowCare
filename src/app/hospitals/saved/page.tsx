@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { AvailabilityPill, FlowCareRating } from '@/components/Badges';
 import { IconCalendar, IconHeart } from '@/components/Icons';
 import type { Hospital } from '@/lib/types';
+import { formatDate } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,7 +69,7 @@ export default function SavedPage() {
               <Link href={`/hospitals/${row.hospital.slug}`} className="hover:text-brand-700">{row.hospital.name}</Link>
             </h2>
             <p className="mt-0.5 text-xs text-ink-500">{row.hospital.addressLine}</p>
-            <p className="mt-1 text-[10px] text-ink-400">Saved {new Date(row.createdAt).toLocaleDateString()}</p>
+            <p className="mt-1 text-[10px] text-ink-400">Saved {formatDate(row.createdAt)}</p>
             <div className="mt-3 flex gap-2">
               <Link href={`/appointments/new?hospital=${row.hospital.slug}`} className="fc-btn-primary flex-1 !min-h-[38px] !py-1.5 text-xs">
                 <IconCalendar width={14} height={14} /> Book
