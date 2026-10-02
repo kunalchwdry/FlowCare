@@ -264,6 +264,16 @@ export interface Appointment {
 
   /** Bumped on every transition. The basis of optimistic concurrency. */
   version?: number;
+  /**
+   * The name the patient gave when booking, stored on the appointment row.
+   *
+   * Operational only — it is what reception calls out, not an identity
+   * record. Hospital staff see it because they cannot run a clinic
+   * addressing people by UUID.
+   */
+  patientName?: string | null;
+  /** Human department name where known; falls back to the id. */
+  departmentName?: string | null;
   /** When the hospital accepted. Null while the request is still pending. */
   confirmedAt?: string | null;
   /**

@@ -137,6 +137,7 @@ export default async function HospitalAppointments({
           <table className="w-full min-w-[920px] text-left text-sm">
             <thead className="border-b border-ink-200 bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
               <tr>
+                <th className="px-4 py-2 font-semibold">Patient</th>
                 <th className="px-4 py-2 font-semibold">Appointment</th>
                 <th className="px-4 py-2 font-semibold">Department</th>
                 <th className="px-4 py-2 font-semibold">Scheduled for</th>
@@ -149,17 +150,21 @@ export default async function HospitalAppointments({
               {rows.map((a) => (
                 <tr key={a.id} className="align-top">
                   <td className="px-4 py-3">
-                    <Link
-                      href={`/hospital/appointments/${a.id}`}
-                      className="font-mono text-xs font-semibold text-brand-700 underline underline-offset-2"
-                    >
-                      {a.id}
-                    </Link>
+                    {/* The name given at booking — what reception calls out.
+                        Operational only, not an identity record. */}
+                    <p className="font-semibold text-ink-900">
+                      {a.patientName || <span className="text-ink-400">Name not given</span>}
+                    </p>
                     {a.reason && (
-                      <p className="mt-1 max-w-xs text-xs text-ink-500">“{a.reason}”</p>
+                      <p className="mt-0.5 max-w-xs text-xs text-ink-500">“{a.reason}”</p>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-ink-700">{a.departmentId}</td>
+                  <td className="px-4 py-3">
+                    <span className="font-mono text-[11px] text-ink-600">{a.id.slice(0, 8)}…</span>
+                  </td>
+                  <td className="px-4 py-3 text-ink-700">
+                    {a.departmentName ?? a.departmentId.split(':dept:')[1] ?? a.departmentId}
+                  </td>
                   <td className="px-4 py-3 text-ink-700">
                     {fmt(a.scheduledFor)}
                     {a.proposedFor && (

@@ -285,13 +285,34 @@ async function realSessions(hospitalIds?: string[]): Promise<ClinicSession[]> {
   });
 }
 
+/**
+ * Department names, cached briefly.
+ *
+ * Appointment rows carry only department_id, and a hospital screen showing
+ * raw UUIDs is unusable at a reception desk.
+ */
+let deptCache: { at: number; names: Map<string, string> } | null = null;
+async function departmentNames(): Promise<Map<string, string>> {
+  if (deptCache && Date.now() - deptCache.at < TTL_MS) return deptCache.names;
+  try {
+    const rows = await rest('departments?select=id,name');
+    const names = new Map(rows.map((d) => [String(d.id), String(d.name)]));
+    deptCache = { at: Date.now(), names };
+    return names;
+  } catch {
+    return new Map();
+  }
+}
+
 /** Map a live `appointments` row onto the application's shape. */
 function mapDbAppointment(r: Row, departmentName?: string): Appointment {
   return {
     id: String(r.id),
     hospitalId: String(r.hospital_id),
     patientId: String(r.patient_id),
-    departmentId: departmentName ?? String(r.department_id),
+    patientName: (r.patient_name as string | null) ?? null,
+    departmentName: departmentName ?? null,
+    departmentId: String(r.department_id),
     sessionId: String(r.slot_id),
     scheduledFor: String(r.scheduled_for ?? r.created_at),
     status: fromDbStatus(String(r.status)),
@@ -362,7 +383,8 @@ export const liveRepo: Repo = {
     if (hospitalId) qb = qb.eq('hospital_id', hospitalId);
     const { data, error } = await qb;
     if (error || !data) return [];
-    return data.map((r) => mapDbAppointment(r as Row));
+    const names = await departmentNames();
+    return data.map((r) => mapDbAppointment(r as Row, names.get(String((r as Row).department_id))));
   },
 
   async getAppointment(id) {
@@ -370,7 +392,8 @@ export const liveRepo: Repo = {
     if (!sb) return null;
     const { data, error } = await sb.from('appointments').select('*').eq('id', id).maybeSingle();
     if (error || !data) return null;
-    return mapDbAppointment(data as Row);
+    const names = await departmentNames();
+    return mapDbAppointment(data as Row, names.get(String((data as Row).department_id)));
   },
 
   /**
