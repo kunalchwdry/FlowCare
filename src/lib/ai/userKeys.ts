@@ -193,17 +193,95 @@ export async function touchUserKey(provider: string): Promise<void> {
  * is to answer "does this actually work", and only the provider can answer
  * that. The stored status is updated from the result.
  */
-export async function validateUserKey(
-  provider: string,
-  timeoutMs: number,
-): Promise<{ ok: boolean; message: string; detail?: string }> {
+/**
+ * Outcomes of a key check, kept distinct on purpose.
+ *
+ * "The provider rejected your key" and "the provider was down" need
+ * different actions from the user, and collapsing them into a boolean is
+ * what made a working key read as broken.
+ */
+export type KeyCheckStatus =
+  | 'working'
+  | 'invalid_key'
+  | 'rate_limited'
+  | 'model_unavailable'
+  | 'provider_unavailable'
+  | 'configuration_error';
+
+export interface KeyCheckResult {
+  ok: boolean;
+  status: KeyCheckStatus;
+  message: string;
+  provider: string;
+  model: string | null;
+  checkedAt: string;
+}
+
+/** Map a thrown provider error onto a status. Never includes the key. */
+export function classifyProviderError(e: unknown): { status: KeyCheckStatus; message: string } {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/abort|timeout|ETIMEDOUT/i.test(msg)) {
+    return { status: 'provider_unavailable', message: 'The provider did not respond in time.' };
+  }
+  if (/provider_http_401|provider_http_403/.test(msg)) {
+    return {
+      status: 'invalid_key',
+      message: 'The provider rejected this key. Check it is active and has the right permissions.',
+    };
+  }
+  if (/provider_http_429/.test(msg)) {
+    return { status: 'rate_limited', message: 'Rate limited or out of quota. The key itself looks fine.' };
+  }
+  if (/provider_http_404/.test(msg)) {
+    return {
+      status: 'model_unavailable',
+      message: 'The provider does not recognise that model name. The key may still be fine.',
+    };
+  }
+  if (/provider_http_(5\d\d)/.test(msg)) {
+    return { status: 'provider_unavailable', message: 'The provider had a server error. Try again shortly.' };
+  }
+  if (/provider_not_configured/.test(msg)) {
+    return { status: 'configuration_error', message: 'No key is configured for that provider.' };
+  }
+  if (/provider_bad_shape/.test(msg)) {
+    return { status: 'configuration_error', message: 'The provider replied with an empty response.' };
+  }
+  // Network-level failures and anything unrecognised. Deliberately NOT
+  // 'invalid_key': we have no evidence the key is bad.
+  return { status: 'provider_unavailable', message: 'Could not reach the provider.' };
+}
+
+/**
+ * Make one real, minimal call with the stored key.
+ *
+ * The check is whether the provider ANSWERED, not whether the model obeyed
+ * the prompt. A 2xx with any text back proves the key authenticated, the
+ * quota allowed the call and the model exists — which is the entire
+ * question being asked.
+ *
+ * This previously required the reply to parse as JSON. A chatty model
+ * returning "Sure! {...}" threw a SyntaxError, which fell through the
+ * provider-error matcher to "Could not reach the provider" and marked a
+ * perfectly good key invalid. Formatting obedience is not authentication.
+ */
+export async function validateUserKey(provider: string, timeoutMs: number): Promise<KeyCheckResult> {
+  const checkedAt = new Date().toISOString();
   const p = getProviderById(provider);
-  if (!p) return { ok: false, message: 'Unknown provider.' };
+  if (!p) {
+    return { ok: false, status: 'configuration_error', message: 'Unknown provider.', provider, model: null, checkedAt };
+  }
 
   const creds = await loadUserCredentials(provider);
-  if (!creds) return { ok: false, message: 'No saved key for that provider.' };
-
+  if (!creds) {
+    return {
+      ok: false, status: 'configuration_error', message: 'No saved key for that provider.',
+      provider, model: null, checkedAt,
+    };
+  }
+  const model = creds.model ?? p.model();
   const sb = await getSupabaseServerClient();
+
   try {
     const raw = await p.completeJson({
       system: 'You are a connectivity check. Reply with compact JSON only.',
@@ -212,17 +290,31 @@ export async function validateUserKey(
       maxOutputTokens: 20,
       credentials: creds,
     });
-    // A parseable response proves auth, quota and model access all work.
-    const parsed = JSON.parse(extractJson(raw)) as Record<string, unknown>;
-    const ok = parsed && typeof parsed === 'object';
-    await sb?.rpc('mark_ai_key', { p_provider: provider, p_ok: ok, p_error: null });
-    return ok
-      ? { ok: true, message: `Key works. ${p.label} responded using ${creds.model ?? p.model()}.` }
-      : { ok: false, message: 'The provider replied in an unexpected format.' };
+
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      const message = 'The provider accepted the key but returned nothing.';
+      await sb?.rpc('mark_ai_key', { p_provider: provider, p_ok: false, p_error: message });
+      return { ok: false, status: 'configuration_error', message, provider, model, checkedAt };
+    }
+
+    await sb?.rpc('mark_ai_key', { p_provider: provider, p_ok: true, p_error: null });
+    return {
+      ok: true,
+      status: 'working',
+      message: `Key works. ${p.label} responded using ${model}.`,
+      provider, model, checkedAt,
+    };
   } catch (e) {
-    const reason = friendlyProviderError(e);
-    await sb?.rpc('mark_ai_key', { p_provider: provider, p_ok: false, p_error: reason });
-    return { ok: false, message: reason };
+    const { status, message } = classifyProviderError(e);
+    // Only a genuine rejection should clear the key's good standing. Being
+    // rate limited or catching an outage says nothing about the key.
+    const keyAtFault = status === 'invalid_key';
+    await sb?.rpc('mark_ai_key', {
+      p_provider: provider,
+      p_ok: keyAtFault ? false : null,
+      p_error: message,
+    });
+    return { ok: false, status, message, provider, model, checkedAt };
   }
 }
 
