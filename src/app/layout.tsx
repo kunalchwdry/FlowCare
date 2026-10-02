@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { headers } from 'next/headers';
 import { AppShell } from '@/components/AppShell';
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export const viewport: Viewport = {
   themeColor: '#3dbbb9',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const isHospital = (await headers()).get('x-flowcare-area') === 'hospital';
+
   return (
     <html lang="en">
       <body>
@@ -25,9 +28,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           Skip to content
         </a>
-        <AppShell>
+        {/*
+          * The hospital portal brings its own chrome (HospitalShell) and
+          * its sign-in page brings its own (AuthShell). Wrapping either in
+          * the patient header gave staff a navigation they must not use —
+          * Discover, Saved, Care hub — and drew a second FlowCare logo on
+          * the sign-in card. Middleware marks the area because a layout
+          * cannot see the pathname.
+          */}
+        {isHospital ? (
           <div id="main">{children}</div>
-        </AppShell>
+        ) : (
+          <AppShell>
+            <div id="main">{children}</div>
+          </AppShell>
+        )}
       </body>
     </html>
   );

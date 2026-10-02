@@ -92,7 +92,23 @@ export async function middleware(request: NextRequest) {
   ) {
     const to = request.nextUrl.clone();
     to.pathname = `/hospital${pathname === '/' ? '' : pathname}`;
-    return NextResponse.rewrite(to);
+    const headers = new Headers(request.headers);
+    headers.set('x-flowcare-area', 'hospital');
+    return NextResponse.rewrite(to, { request: { headers } });
+  }
+
+  /*
+   * Tell the root layout which product this request belongs to.
+   *
+   * A layout cannot see the pathname, so without this the patient header —
+   * Discover, Map, Saved, Care hub — was drawn around the hospital portal,
+   * giving staff a second navigation they must not use and a second
+   * FlowCare logo on the sign-in page.
+   */
+  if (pathname === '/hospital' || pathname.startsWith('/hospital/')) {
+    const headers = new Headers(request.headers);
+    headers.set('x-flowcare-area', 'hospital');
+    return NextResponse.next({ request: { headers } });
   }
 
   const door = signedInDoorFor(request.nextUrl.pathname);
