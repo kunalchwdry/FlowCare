@@ -60,8 +60,24 @@ export function LoginForm({
       // used: signing in at the hospital entrance with a patient account
       // still lands on the patient side rather than a portal that would
       // refuse every page.
-      const fallback = actual === 'patient' ? '/patient' : '/staff';
-      router.push(next && actual !== 'patient' ? next : fallback);
+      /*
+       * Where to land, decided from the role the SERVER resolved.
+       *
+       * On a hospital hostname there is no patient app to fall back to —
+       * /patient rewrites to /hospital/patient and 404s — so a patient
+       * account signing in there is sent to the apex instead of a dead end.
+       */
+      const onHospitalHost =
+        typeof window !== 'undefined' &&
+        /^(hospital|staff)[.-]/.test(window.location.hostname);
+
+      let target: string;
+      if (actual === 'patient') {
+        target = onHospitalHost ? '/login?from=patient' : '/patient';
+      } else {
+        target = next ?? (onHospitalHost ? '/' : '/staff');
+      }
+      router.push(target);
       router.refresh();
     } catch {
       setFormError('We could not reach FlowCare. Check your connection and try again.');

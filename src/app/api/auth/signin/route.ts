@@ -35,11 +35,38 @@ export async function POST(req: NextRequest) {
       return fail(401, 'Those details did not match an account. If you have just signed up, confirm your email first.');
     }
 
+    /*
+     * Resolve the role the same way getSession does — from memberships.
+     *
+     * This route returned no role at all, so the client fell back to
+     * 'patient' on every sign-in and redirected there. On the hospital
+     * hostname /patient does not exist, so a hospital administrator signing
+     * in correctly was shown "Page not found".
+     *
+     * app_metadata is deliberately not consulted: only a service-role key
+     * can write it, this deployment holds none, and memberships is the
+     * live operational source with an approval trail behind it.
+     */
+    const { data: membership } = await supabase
+      .from('memberships')
+      .select('hospital_id, permissions')
+      .eq('user_id', data.user.id)
+      .eq('status', 'active')
+      .limit(1)
+      .maybeSingle();
+
+    const perms = (membership?.permissions as string[] | null) ?? [];
+    const role = membership
+      ? (perms.includes('memberships:manage') ? 'admin' : 'staff')
+      : 'patient';
+
     return ok({
       user: {
         id: data.user.id,
         email: data.user.email,
         name: (data.user.user_metadata?.full_name as string) ?? data.user.email,
+        role,
+        hospitalId: membership?.hospital_id ?? null,
       },
     });
   } catch (e) {
