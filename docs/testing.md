@@ -154,3 +154,32 @@ The live figure (75) was measured on 2026-09-27 against the real Supabase
 project and has not been re-run since; the offline figure is from today.
 **Run the offline suite with a server up** — `FLOWCARE_TEST_BASE_URL=http://127.0.0.1:3000 npm test` — or the
 two HTTP suites report 71 skips and prove nothing.
+
+
+## Running the HTTP tests
+
+The HTTP suites talk to a server you start yourself. It must be started with
+demo accounts explicitly enabled:
+
+```bash
+FLOWCARE_DEMO_MODE=true \
+FLOWCARE_ALLOW_DEMO_AUTH=true \
+FLOWCARE_LIVE_READS=false \
+FLOWCARE_DEMO_HOSPITAL_ID= \
+  npx next start -p 3000
+```
+
+`FLOWCARE_ALLOW_DEMO_AUTH=true` is not optional and not a workaround.
+`next start` is a production build, and on a production build with a real
+Supabase project configured FlowCare refuses the demo cookie outright — a
+cookie that names an administrator must not be a credential on a public
+origin. The test harness is a deliberate demo, so it opts in deliberately.
+
+Omitting it looks like a code regression: every authenticated request comes
+back 401 and roughly 25 tests fail on status codes.
+
+Run against that server with:
+
+```bash
+FLOWCARE_LIVE_READS=false FLOWCARE_DEMO_HOSPITAL_ID= npx vitest run
+```
