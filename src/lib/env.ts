@@ -61,6 +61,29 @@ export function isDemoMode(): boolean {
  */
 export type DemoReason = 'forced' | 'unconfigured';
 
+/**
+ * May this deployment honour demo accounts at all?
+ *
+ * Demo accounts are a cookie away from an administrator session — that is
+ * the point of them, and it is why they must never coexist with a real
+ * Supabase project on a public origin. Gating only the switching endpoint
+ * is not enough: the cookie can be set by hand, and getSession() cannot
+ * tell the difference.
+ *
+ * So this is checked where the cookie is READ, not only where it is
+ * written. On a production build with a configured project, demo accounts
+ * are off unless FLOWCARE_ALLOW_DEMO_AUTH=true says otherwise in so many
+ * words.
+ */
+export function demoAccountsAllowed(): boolean {
+  if (!isDemoMode()) return false;
+  const configured = Boolean(env.supabaseUrl() && env.supabaseAnonKey());
+  if (process.env.NODE_ENV === 'production' && configured) {
+    return s(process.env.FLOWCARE_ALLOW_DEMO_AUTH) === 'true';
+  }
+  return true;
+}
+
 export function demoReason(): DemoReason | null {
   if (!isDemoMode()) return null;
   return env.demoModeForced() && env.supabaseUrl() && env.supabaseAnonKey()

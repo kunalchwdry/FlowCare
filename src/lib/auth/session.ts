@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import { isDemoMode } from '@/lib/env';
+import { demoAccountsAllowed, isDemoMode } from '@/lib/env';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { DEMO_USERS } from '@/lib/data/seed';
 
@@ -78,6 +78,15 @@ export async function getSession(): Promise<SessionUser | null> {
       source: 'supabase',
     };
   }
+
+  /*
+   * The demo cookie is only a credential where demo accounts are permitted.
+   *
+   * Checked here rather than only at /api/demo-auth because the endpoint
+   * is not the only way the cookie can appear — anyone can send the header
+   * by hand. Reading it is the chokepoint; writing it is not.
+   */
+  if (!demoAccountsAllowed()) return null;
 
   const store = await cookies();
   const key = store.get(DEMO_COOKIE)?.value as keyof typeof DEMO_USERS | undefined;
