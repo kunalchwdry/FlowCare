@@ -47,6 +47,26 @@ export default async function AppointmentsPage() {
   }
 
   const [appointments, hospitals] = await Promise.all([repo.listAppointments({ patientId: user.id }), repo.listHospitals()]);
+
+  /*
+   * Which appointments the hospital has moved.
+   *
+   * A reschedule changes the slot and leaves the status alone, so there is
+   * nothing in the row itself to tell a patient their time changed. The
+   * event log is the only record, and without this the appointment simply
+   * showed a different time one day with no explanation.
+   */
+  const movedIds = new Set<string>();
+  await Promise.all(
+    appointments
+      .filter((a) => ['requested', 'booked', 'checked_in'].includes(a.status))
+      .map(async (a) => {
+        const events = await repo.listAppointmentEvents(a.id).catch(() => []);
+        if (events.some((e) => e.action === 'reschedule' || e.action === 'propose_reschedule')) {
+          movedIds.add(a.id);
+        }
+      }),
+  );
   const byId = new Map(hospitals.map((h) => [h.id, h]));
   const upcoming = appointments
     .filter((a) =>
@@ -100,6 +120,12 @@ export default async function AppointmentsPage() {
                 {a.status === 'booked' && (
                   <p className="text-[11px] font-medium text-brand-800">
                     Confirmed by {byId.get(a.hospitalId)?.name ?? 'the hospital'}
+                  </p>
+                )}
+                {movedIds.has(a.id) && (
+                  <p className="mt-0.5 rounded bg-amber-50 px-1.5 py-1 text-[11px] font-semibold text-amber-900">
+                    Time changed by {byId.get(a.hospitalId)?.name ?? 'the hospital'} — the time
+                    above is the current one. Check it before you travel.
                   </p>
                 )}
                 {a.status === 'reschedule_proposed' && (

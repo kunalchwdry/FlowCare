@@ -62,7 +62,21 @@ interface Rule {
 const RULES: Record<Action, Rule> = {
   accept:             { from: ['requested'], to: 'booked', by: ['hospital'], permission: 'appointments:manage' },
   reject:             { from: ['requested'], to: 'rejected', by: ['hospital'], permission: 'appointments:manage', requiresReason: true },
-  propose_reschedule: { from: ['requested', 'booked'], to: 'reschedule_proposed', by: ['hospital'], permission: 'appointments:manage', requiresSlot: true, requiresReason: true },
+  /*
+   * A move, not a proposal.
+   *
+   * This used to transition to 'reschedule_proposed' and wait for the
+   * patient. The database does not work that way: mutate_appointment's
+   * 'reschedule' swaps slot_id and leaves the status alone, so the
+   * appointment is simply at a new time the moment staff confirm it.
+   * Modelling a proposal the backend never honours meant the hospital
+   * believed it had asked, while the patient was moved without being
+   * asked — and saw nothing at all.
+   *
+   * A real proposal needs a status the CHECK constraint permits, which is
+   * a migration. Until then the UI says what actually happens.
+   */
+  propose_reschedule: { from: ['requested', 'booked'], to: 'booked', by: ['hospital'], permission: 'appointments:manage', requiresSlot: true, requiresReason: true },
   accept_reschedule:  { from: ['reschedule_proposed'], to: 'booked', by: ['patient'] },
   decline_reschedule: { from: ['reschedule_proposed'], to: 'cancelled', by: ['patient'] },
   cancel:             { from: ['requested', 'booked', 'reschedule_proposed'], to: 'cancelled', by: ['patient', 'hospital'], permission: 'appointments:manage', requiresReason: true },
@@ -76,7 +90,7 @@ export function actionLabel(a: Action): string {
   return {
     accept: 'Accept request',
     reject: 'Decline request',
-    propose_reschedule: 'Propose another time',
+    propose_reschedule: 'Move to another time',
     accept_reschedule: 'Accept new time',
     decline_reschedule: 'Decline new time',
     cancel: 'Cancel appointment',
