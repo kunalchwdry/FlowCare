@@ -8,7 +8,16 @@ export const metadata: Metadata = { title: 'Reset your password — FlowCare' };
  * Password reset is delegated to Supabase Auth's recovery email. This page
  * states that plainly rather than pretending to send something itself.
  */
-export default function ForgotPasswordPage() {
+export default async function ForgotPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string; error_code?: string }>;
+}) {
+  const params = await searchParams;
+  const expired = params.error === 'expired_link'
+    || params.error === 'access_denied'
+    || params.error_code === 'otp_expired';
+
   return (
     <div className="mx-auto w-full max-w-md py-10">
       <div className="fc-card p-7">
@@ -21,6 +30,11 @@ export default function ForgotPasswordPage() {
           For your safety we show the same message either way, so nobody can use this page to
           discover which addresses are registered.
         </p>
+        {expired && (
+          <p role="alert" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 ring-1 ring-amber-200">
+            That recovery link has expired or was already used. Enter your email below to request a fresh link.
+          </p>
+        )}
         <form
           className="mt-6 space-y-4"
           action="/api/auth/recover"
