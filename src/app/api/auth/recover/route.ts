@@ -17,7 +17,14 @@ const Email = z.string().email().max(200);
  * enumeration oracle.
  */
 export async function POST(req: NextRequest) {
-  const sent = new URL('/forgot-password/sent', req.nextUrl.origin);
+  const host = req.nextUrl.hostname.toLowerCase();
+  const onHospitalHost = host.startsWith('hospital-') || host.startsWith('hospital.') || host.startsWith('staff.');
+  // Never let a production recovery email inherit localhost from an old
+  // preview/proxy origin. Local development still uses its own origin.
+  const recoveryOrigin = process.env.NODE_ENV === 'production'
+    ? (onHospitalHost ? 'https://hospital-flowcare.vercel.app' : 'https://flowcare-five.vercel.app')
+    : req.nextUrl.origin;
+  const sent = new URL('/forgot-password/sent', recoveryOrigin);
 
   try {
     const rl = rateLimit(`recover:${clientKey(req)}`, 5);
@@ -28,7 +35,7 @@ export async function POST(req: NextRequest) {
       if (parsed.success && supabase) {
         await supabase.auth
           .resetPasswordForEmail(parsed.data, {
-            redirectTo: `${req.nextUrl.origin}/patient/login`,
+            redirectTo: `${recoveryOrigin}/auth/callback?next=/reset-password`,
           })
           .catch(() => undefined);
       }
