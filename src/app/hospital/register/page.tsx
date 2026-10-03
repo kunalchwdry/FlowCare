@@ -15,8 +15,8 @@ export default function RegisterHospital() {
         <FlowCareMark size={40} className="mx-auto text-brand-600" />
         <h1 className="mt-4 text-3xl font-bold text-ink-900">Register your hospital</h1>
         <p className="mx-auto mt-3 max-w-xl text-sm text-ink-600">
-          Take over your hospital’s FlowCare listing, publish real appointment availability, and
-          accept or decline requests from the hospital portal.
+          Register a new hospital or claim an existing FlowCare listing. After verification, your
+          approved administrator can manage availability and appointment requests from the portal.
         </p>
       </div>
 
@@ -27,7 +27,7 @@ export default function RegisterHospital() {
           ['Listed', 'Your hospital is already findable on FlowCare — most are, imported from OpenStreetMap.'],
           ['You claim it', 'You tell us who you are and how we can check it.'],
           ['We verify', 'A person confirms the connection. This step is not automated.'],
-          ['Access granted', 'Your first administrator account is created, and they invite the rest of your staff.'],
+          ['Access granted', 'Your sign-in is linked to the hospital after approval, and you can invite the rest of your staff.'],
           ['Booking enabled', 'Once you publish availability, patients can request appointments.'],
         ].map(([title, body], i) => (
           <li key={title} className="flex gap-3">
