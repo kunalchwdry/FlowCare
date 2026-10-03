@@ -17,10 +17,9 @@ const NAV = [
   { href: '/care', label: 'Care hub', Icon: IconHeart },
 ];
 
-/** Secondary links: account + keys live in the header, not the bottom bar. */
+/** Secondary account link lives in the header, not the bottom bar. */
 const ACCOUNT_NAV = [
   { href: '/account', label: 'Account' },
-  { href: '/settings', label: 'AI settings' },
 ];
 
 interface Config {

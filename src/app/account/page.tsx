@@ -9,8 +9,7 @@ export default function AccountPage() {
     <main id="main" className="mx-auto w-full max-w-md px-4 py-10">
       <h1 className="text-2xl font-bold text-ink-900">Your FlowCare account</h1>
       <p className="mt-2 text-sm text-ink-600">
-        An account lets you save hospitals, track visits, invite a care partner, and use your own
-        AI provider key.
+        An account lets you save hospitals, track visits, and invite a care partner.
       </p>
       <AccountForm />
     </main>

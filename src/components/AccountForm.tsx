@@ -109,9 +109,6 @@ export function AccountForm() {
           )}
         </div>
         <div className="flex flex-wrap gap-2">
-          <a href="/settings" className="fc-btn-secondary text-sm">
-            AI provider keys
-          </a>
           <a href="/appointments" className="fc-btn-secondary text-sm">
             My visits
           </a>
