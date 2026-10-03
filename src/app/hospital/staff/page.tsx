@@ -3,6 +3,8 @@ import { getRepo } from '@/lib/data';
 import { HospitalShell, Stat, NoData } from '@/components/hospital/HospitalShell';
 import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { listStaff, listMembershipEvents } from '@/lib/hospital/portalData';
+import { listRequests } from '@/lib/staff/accessRequests';
+import { AccessRequestList } from '@/components/staff/AccessRequestList';
 import type { HospitalPermission } from '@/lib/auth/hospital';
 import { formatDate, formatDateTime } from '@/lib/time';
 
@@ -37,10 +39,13 @@ export default async function HospitalStaff() {
 
   const { actor } = gate;
   const repo = await getRepo();
-  const [hospital, staff, events] = await Promise.all([
+  const [hospital, staff, events, accessRequests] = await Promise.all([
     repo.getHospital(actor.hospitalId),
     listStaff(actor.hospitalId),
     listMembershipEvents(actor.hospitalId),
+    actor.permissions.includes('memberships:manage')
+      ? listRequests({ hospitalId: actor.hospitalId })
+      : Promise.resolve([]),
   ]);
 
   const active = staff.filter((s) => s.status === 'active');
@@ -127,14 +132,16 @@ export default async function HospitalStaff() {
         </div>
       )}
 
-      <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-        <p className="text-sm font-bold text-amber-900">Granting access is not wired to this screen yet</p>
-        <p className="mt-1 text-sm text-amber-900">
-          Changes have to go through <span className="font-mono">manage_membership</span>, which
-          records who approved whom and bumps the row version. Writing to the table directly from
-          here would skip that trail, so for now an operator makes the change.
+      <section className="mt-7">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-ink-500">Access requests</h2>
+        <p className="mt-1 text-sm text-ink-600">
+          Colleagues who registered for this hospital appear here. Approving a request changes
+          access only after the hospital administrator confirms it.
         </p>
-      </div>
+        <div className="mt-3">
+          <AccessRequestList initial={accessRequests} />
+        </div>
+      </section>
 
       <h2 className="mt-7 text-sm font-bold uppercase tracking-wide text-ink-500">Permission reference</h2>
       <div className="mt-2 grid gap-3 md:grid-cols-2">
