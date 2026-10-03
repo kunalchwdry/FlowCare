@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getRepo } from '@/lib/data';
 import { getSession } from '@/lib/auth/session';
+import { AppointmentMessages } from '@/components/appointments/AppointmentMessages';
 import { label } from '@/lib/discovery/filters';
 import { IconCalendar } from '@/components/Icons';
 import { formatDateTime } from '@/lib/time';
@@ -25,6 +26,11 @@ const STATUS_COPY: Record<string, { pill: string; tone: string; detail: string }
     pill: 'Confirmed by the hospital',
     tone: 'bg-brand-50 text-brand-900 ring-1 ring-brand-200',
     detail: 'The hospital has accepted this slot. Bring the documents listed on your visit card.',
+  },
+  reschedule_proposed: {
+    pill: 'New time suggested',
+    tone: 'bg-amber-50 text-amber-900 ring-1 ring-amber-200',
+    detail: 'The hospital has suggested a different time. Read the message below and accept it or keep your original time.',
   },
   cancelled: {
     pill: 'Cancelled',
@@ -50,6 +56,7 @@ export default async function AppointmentReceiptPage({
   if (!appointment || appointment.patientId !== user.id) notFound();
 
   const hospital = await repo.getHospital(appointment.hospitalId);
+  const messages = await repo.listAppointmentMessages(appointment.id).catch(() => []);
   const copy = STATUS_COPY[appointment.status] ?? {
     pill: appointment.status,
     tone: 'bg-ink-100 text-ink-700 ring-1 ring-ink-200',
@@ -91,6 +98,14 @@ export default async function AppointmentReceiptPage({
           and it gives no medical advice about whether this is the right appointment for you.
         </p>
       </section>
+
+      <AppointmentMessages
+        appointmentId={appointment.id}
+        audience="patient"
+        version={appointment.version ?? 1}
+        status={appointment.status}
+        initialMessages={messages}
+      />
 
       <section className="fc-card p-5">
         <h2 className="text-sm font-bold">Before you go</h2>

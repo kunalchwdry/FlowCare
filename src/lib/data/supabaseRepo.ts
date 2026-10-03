@@ -179,8 +179,14 @@ export function createSupabaseRepo(
     async transitionAppointment() {
       throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
     },
-    async listAppointmentEvents() {
+      async listAppointmentEvents() {
       throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
+    },
+    async listAppointmentMessages() {
+      return [];
+    },
+    async sendAppointmentMessage() {
+      throw new Error('NOT_IMPLEMENTED_SUPABASE_MESSAGES');
     },
     async listNotifications() {
       return [];
