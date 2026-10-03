@@ -307,6 +307,21 @@ export interface AppointmentEvent {
   createdAt: string;
 }
 
+/** A short, in-app message attached to one appointment. */
+export interface AppointmentMessage {
+  id: string;
+  appointmentId: string;
+  senderSide: 'patient' | 'hospital' | 'system';
+  senderId: string | null;
+  kind: 'message' | 'time_proposal' | 'time_response';
+  body: string;
+  proposedSessionId?: string | null;
+  proposedFor?: string | null;
+  previousStatus?: Appointment['status'] | null;
+  proposalStatus?: 'pending' | 'accepted' | 'declined' | null;
+  createdAt: string;
+}
+
 /** In-app notification. Delivery is in-app only unless a provider is configured. */
 export interface Notification {
   id: string;

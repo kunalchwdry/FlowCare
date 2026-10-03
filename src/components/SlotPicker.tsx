@@ -98,7 +98,7 @@ export function SlotPicker({
                   aria-label={`Request ${s.startTime} on ${s.date}`}
                   className="fc-btn-primary mt-2 w-full !min-h-[38px] !py-1.5 text-[11px]"
                 >
-                  Continue <IconChevron width={13} height={13} />
+                  Select this time <IconChevron width={13} height={13} />
                 </button>
               ) : (
                 <div className="mt-2 space-y-2 border-t border-ink-200 pt-2">
@@ -124,7 +124,7 @@ export function SlotPicker({
                       onClick={() => submit(s.id)}
                       className="fc-btn-primary flex-1 !min-h-[38px] !py-1.5 text-[11px] disabled:opacity-60"
                     >
-                      {busy ? 'Sending…' : 'Request this slot'}
+                      {busy ? 'Sending…' : 'Request this time'}
                     </button>
                     <button
                       type="button"

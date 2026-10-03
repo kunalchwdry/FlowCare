@@ -21,9 +21,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { demoRepo } from './demoRepo';
-import type { Repo } from './repo';
+import type { NewAppointmentMessage, Repo } from './repo';
 import type {
-  Appointment,
+  Appointment, AppointmentMessage,
   ClinicSession, Hospital, HospitalDepartment, HospitalService, HospitalType,
 } from '@/lib/types';
 
@@ -331,6 +331,55 @@ function mapDbAppointment(r: Row, departmentName?: string): Appointment {
   };
 }
 
+function mapDbMessage(r: Row): AppointmentMessage {
+  return {
+    id: String(r.id),
+    appointmentId: String(r.appointment_id),
+    senderSide: String(r.sender_side) as AppointmentMessage['senderSide'],
+    senderId: r.sender_id ? String(r.sender_id) : null,
+    kind: String(r.kind) as AppointmentMessage['kind'],
+    body: String(r.body),
+    proposedSessionId: r.proposed_slot_id ? String(r.proposed_slot_id) : null,
+    proposedFor: r.proposed_for ? String(r.proposed_for) : null,
+    previousStatus: r.previous_status ?? null,
+    proposalStatus: r.proposal_status ?? null,
+    createdAt: String(r.created_at),
+  };
+}
+
+async function pendingProposal(sb: any, appointmentId: string): Promise<AppointmentMessage | null> {
+  const { data, error } = await sb
+    .from('appointment_messages')
+    .select('*')
+    .eq('appointment_id', appointmentId)
+    .eq('kind', 'time_proposal')
+    .eq('proposal_status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error || !data?.[0]) return null;
+  return mapDbMessage(data[0] as Row);
+}
+
+function applyPendingProposal(appointment: Appointment, proposal: AppointmentMessage | null): Appointment {
+  if (!proposal) return appointment;
+  return {
+    ...appointment,
+    status: 'reschedule_proposed',
+    proposedSessionId: proposal.proposedSessionId ?? null,
+    proposedFor: proposal.proposedFor ?? null,
+    decisionReason: proposal.body,
+  };
+}
+
+async function hydrateAppointmentTimes(sb: any, appointments: Appointment[]): Promise<Appointment[]> {
+  const ids = [...new Set(appointments.map((a) => a.sessionId).filter(Boolean))];
+  if (!ids.length) return appointments;
+  const { data, error } = await sb.from('slots').select('id, starts_at').in('id', ids);
+  if (error || !data) return appointments;
+  const byId = new Map<string, string>(data.map((r: Row) => [String(r.id), String(r.starts_at)] as [string, string]));
+  return appointments.map((a) => ({ ...a, scheduledFor: byId.get(a.sessionId) ?? a.scheduledFor }));
+}
+
 export const liveRepo: Repo = {
   ...demoRepo,
   kind: 'supabase',
@@ -392,7 +441,12 @@ export const liveRepo: Repo = {
     const { data, error } = await qb;
     if (error || !data) return [];
     const names = await departmentNames();
-    return data.map((r) => mapDbAppointment(r as Row, names.get(String((r as Row).department_id))));
+    const rows = await hydrateAppointmentTimes(
+      sb,
+      data.map((r) => mapDbAppointment(r as Row, names.get(String((r as Row).department_id)))),
+    );
+    const proposals = await Promise.all(rows.map((a) => pendingProposal(sb, a.id)));
+    return rows.map((a, i) => applyPendingProposal(a, proposals[i]));
   },
 
   async getAppointment(id) {
@@ -401,59 +455,53 @@ export const liveRepo: Repo = {
     const { data, error } = await sb.from('appointments').select('*').eq('id', id).maybeSingle();
     if (error || !data) return null;
     const names = await departmentNames();
-    return mapDbAppointment(data as Row, names.get(String((data as Row).department_id)));
+    const appointment = (await hydrateAppointmentTimes(
+      sb,
+      [mapDbAppointment(data as Row, names.get(String((data as Row).department_id)))],
+    ))[0];
+    return applyPendingProposal(appointment, await pendingProposal(sb, appointment.id));
   },
 
-  /**
-   * Hospital and patient decisions, through `transition_appointment`.
-   *
-   * Authorisation is the database's: the RPC derives the hospital from the
-   * appointment itself and calls private.require_permission, so a forged
-   * hospital id in a request body changes nothing. Optimistic concurrency
-   * is its `p_version`.
-   *
-   * Two app actions have no database equivalent — answering a reschedule
-   * proposal — because this schema has no "proposed" state. Rather than
-   * invent one, those are refused here.
-   */
+  /** Hospital and patient decisions, including the explicit time-proposal loop. */
   async transitionAppointment(input) {
     const action = input.action as Action;
-    const dbAction = toDbAction(action);
-    if (!dbAction || !isPersistable(action)) throw new Error('UNSUPPORTED_TRANSITION');
-
-    /*
-     * The decline reason cannot be stored.
-     *
-     * transition_appointment takes (p_action, p_id, p_version, p_key,
-     * p_slot) and the appointments table has no reason column, so a reason
-     * collected by the UI has nowhere to go in this schema. It is dropped
-     * here rather than silently appearing to save: the patient-facing copy
-     * must not promise an explanation the database never received.
-     *
-     * Storing it needs a migration — either a column or a row in
-     * appointment_events.details — and that has not been made yet.
-     */
-
     const sb = await getSupabaseServerClient();
     if (!sb) throw new Error('BOOKING_UNAVAILABLE');
 
-    const { data, error } = await sb.rpc('transition_appointment', {
-      p_action: dbAction,
-      p_id: input.appointmentId,
-      p_version: input.expectedVersion ?? null,
-      p_key: idempotencyKey([dbAction, input.appointmentId, input.expectedVersion ?? 0]),
-      p_slot: dbAction === 'reschedule' ? input.proposedSessionId ?? null : null,
-    });
+    let rpc = 'transition_appointment';
+    let params: Record<string, unknown>;
+    if (action === 'propose_reschedule') {
+      rpc = 'propose_appointment_time';
+      params = {
+        p_id: input.appointmentId,
+        p_version: input.expectedVersion ?? null,
+        p_slot: input.proposedSessionId ?? null,
+        p_key: idempotencyKey(['propose-time', input.appointmentId, input.proposedSessionId, input.expectedVersion ?? 0]),
+        p_message: input.reason ?? null,
+      };
+    } else if (action === 'accept_reschedule' || action === 'decline_reschedule') {
+      rpc = 'respond_appointment_time';
+      params = {
+        p_id: input.appointmentId,
+        p_version: input.expectedVersion ?? null,
+        p_accept: action === 'accept_reschedule',
+        p_key: idempotencyKey(['respond-time', input.appointmentId, action, input.expectedVersion ?? 0]),
+        p_message: input.reason ?? null,
+      };
+    } else {
+      const dbAction = toDbAction(action);
+      if (!dbAction || !isPersistable(action)) throw new Error('UNSUPPORTED_TRANSITION');
+      params = {
+        p_action: dbAction,
+        p_id: input.appointmentId,
+        p_version: input.expectedVersion ?? null,
+        p_key: idempotencyKey([dbAction, input.appointmentId, input.expectedVersion ?? 0]),
+        p_slot: null,
+      };
+    }
 
+    const { data, error } = await sb.rpc(rpc, params);
     if (error) {
-      /*
-       * mutate_appointment raises exactly nine named codes. Mapping only
-       * some of them meant a VERSION_CONFLICT arrived as an unmatched
-       * message and surfaced to the user as HTTP 500 "Something went
-       * wrong" — a raw failure for a condition the product has a precise
-       * answer to. The full set is handled, and anything genuinely
-       * unrecognised is still not reported as the caller's fault.
-       */
       const m = String(error.message ?? '');
       const known = [
         'VERSION_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'NOT_FOUND',
@@ -469,7 +517,8 @@ export const liveRepo: Repo = {
 
     const row = (Array.isArray(data) ? data[0] : data) as Row;
     if (!row?.id) throw new Error('NOT_FOUND');
-    return mapDbAppointment(row);
+    const appointment = (await hydrateAppointmentTimes(sb, [mapDbAppointment(row)]))[0];
+    return applyPendingProposal(appointment, await pendingProposal(sb, appointment.id));
   },
 
   async listAppointmentEvents(appointmentId) {
@@ -496,6 +545,39 @@ export const liveRepo: Repo = {
         createdAt: String(e.occurred_at),
       };
     });
+  },
+
+  async listAppointmentMessages(appointmentId) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) return [];
+    const { data, error } = await sb
+      .from('appointment_messages')
+      .select('*')
+      .eq('appointment_id', appointmentId)
+      .order('created_at', { ascending: true });
+    if (error || !data) return [];
+    return data.map((r) => mapDbMessage(r as Row));
+  },
+
+  async sendAppointmentMessage(input: NewAppointmentMessage) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('BOOKING_UNAVAILABLE');
+    const { data, error } = await sb
+      .from('appointment_messages')
+      .insert({
+        appointment_id: input.appointmentId,
+        sender_id: input.senderId,
+        sender_side: input.senderSide,
+        kind: 'message',
+        body: input.body.trim(),
+      })
+      .select('*')
+      .single();
+    if (error || !data) {
+      if (/not found|permission|row-level security/i.test(String(error?.message ?? ''))) throw new Error('NOT_FOUND');
+      throw new Error('MESSAGE_FAILED');
+    }
+    return mapDbMessage(data as Row);
   },
 
   async listHospitals() {

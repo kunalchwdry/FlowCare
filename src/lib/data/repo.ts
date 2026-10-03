@@ -1,11 +1,9 @@
 import type {
-  AccessibilityComponent, Appointment, ArrivalPack, CareContext, ClinicSession,
-  FacilityCharge, FacilityCorrection, Favorite, FollowUpTask, Hospital,
-  HospitalReview, LanguageSupport, ModerationEvent, PrepRequirement,
-  QueueSnapshot, ReviewReport, SchemeListing, ServiceVerification, VisitRecord,
-  WayfindingRoute,
-  AppointmentEvent,
-  Notification,
+  AccessibilityComponent, Appointment, AppointmentMessage, ArrivalPack, CareContext,
+  ClinicSession, FacilityCharge, FacilityCorrection, Favorite, FollowUpTask, Hospital,
+  HospitalReview, LanguageSupport, ModerationEvent, PrepRequirement, QueueSnapshot,
+  ReviewReport, SchemeListing, ServiceVerification, VisitRecord, WayfindingRoute,
+  AppointmentEvent, Notification,
 } from '@/lib/types';
 
 /** Storage-agnostic contract. Implemented by demoRepo and supabaseRepo. */
@@ -30,6 +28,8 @@ export interface Repo {
    */
   transitionAppointment(input: TransitionInput): Promise<Appointment>;
   listAppointmentEvents(appointmentId: string): Promise<AppointmentEvent[]>;
+  listAppointmentMessages(appointmentId: string): Promise<AppointmentMessage[]>;
+  sendAppointmentMessage(input: NewAppointmentMessage): Promise<AppointmentMessage>;
 
   listNotifications(audience: 'patient' | 'hospital', recipientId: string): Promise<Notification[]>;
   markNotificationsRead(audience: 'patient' | 'hospital', recipientId: string): Promise<void>;
@@ -118,6 +118,13 @@ export interface NewAppointmentRequest {
   /** Hospital, department and time are derived from the session, not the client. */
   sessionId: string;
   reason?: string | null;
+}
+
+export interface NewAppointmentMessage {
+  appointmentId: string;
+  senderSide: 'patient' | 'hospital';
+  senderId: string;
+  body: string;
 }
 
 export interface NewVisitRecord {

@@ -9,6 +9,7 @@ import {
   availableActions,
   type Action,
 } from '@/lib/appointments/stateMachine';
+import { AppointmentMessages } from '@/components/appointments/AppointmentMessages';
 
 interface SlotOption { id: string; label: string }
 
@@ -114,8 +115,7 @@ export function AppointmentActions({
             <label className="mt-2 block">
               <span className="text-[11px] font-semibold text-ink-700">Move to this time</span>
               <span className="mt-0.5 block text-[10px] text-amber-800">
-                This takes effect immediately — the patient is not asked first.
-                Tell them before you move it.
+                The patient will see this proposed time and can accept it or keep the original appointment.
               </span>
               <select
                 value={slotId}
@@ -136,8 +136,7 @@ export function AppointmentActions({
                 Reason
               </span>
               <span className="mt-0.5 block text-[10px] text-amber-800">
-                Not stored yet against the live database — this schema has no field
-                for it. Please also tell the patient directly.
+                This is shown to the patient in the appointment conversation.
               </span>
               <textarea
                 value={reason}
@@ -174,6 +173,14 @@ export function AppointmentActions({
       )}
 
       {error && !open && <p className="text-xs font-semibold text-rose-700">{error}</p>}
+
+      <AppointmentMessages
+        appointmentId={appointmentId}
+        audience="hospital"
+        version={version}
+        status={status}
+        compact
+      />
     </div>
   );
 }

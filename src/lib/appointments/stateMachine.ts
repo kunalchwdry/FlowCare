@@ -23,7 +23,7 @@ export const ACTIONS = [
   'reject',            // hospital: requested -> rejected
   'propose_reschedule',// hospital: requested|booked -> reschedule_proposed
   'accept_reschedule', // patient:  reschedule_proposed -> booked
-  'decline_reschedule',// patient:  reschedule_proposed -> cancelled
+  'decline_reschedule',// patient:  reschedule_proposed -> booked (keep original time)
   'cancel',            // either:   requested|booked|reschedule_proposed -> cancelled
   'check_in',          // hospital: booked -> checked_in
   'start',             // hospital: checked_in -> in_progress
@@ -62,23 +62,10 @@ interface Rule {
 const RULES: Record<Action, Rule> = {
   accept:             { from: ['requested'], to: 'booked', by: ['hospital'], permission: 'appointments:manage' },
   reject:             { from: ['requested'], to: 'rejected', by: ['hospital'], permission: 'appointments:manage', requiresReason: true },
-  /*
-   * A move, not a proposal.
-   *
-   * This used to transition to 'reschedule_proposed' and wait for the
-   * patient. The database does not work that way: mutate_appointment's
-   * 'reschedule' swaps slot_id and leaves the status alone, so the
-   * appointment is simply at a new time the moment staff confirm it.
-   * Modelling a proposal the backend never honours meant the hospital
-   * believed it had asked, while the patient was moved without being
-   * asked — and saw nothing at all.
-   *
-   * A real proposal needs a status the CHECK constraint permits, which is
-   * a migration. Until then the UI says what actually happens.
-   */
-  propose_reschedule: { from: ['requested', 'booked'], to: 'booked', by: ['hospital'], permission: 'appointments:manage', requiresSlot: true, requiresReason: true },
+  /* The hospital's suggested time remains pending until the patient answers. */
+  propose_reschedule: { from: ['requested', 'booked'], to: 'reschedule_proposed', by: ['hospital'], permission: 'appointments:manage', requiresSlot: true, requiresReason: true },
   accept_reschedule:  { from: ['reschedule_proposed'], to: 'booked', by: ['patient'] },
-  decline_reschedule: { from: ['reschedule_proposed'], to: 'cancelled', by: ['patient'] },
+  decline_reschedule: { from: ['reschedule_proposed'], to: 'booked', by: ['patient'] },
   cancel:             { from: ['requested', 'booked', 'reschedule_proposed'], to: 'cancelled', by: ['patient', 'hospital'], permission: 'appointments:manage', requiresReason: true },
   check_in:           { from: ['booked'], to: 'checked_in', by: ['hospital'], permission: 'queue:manage' },
   start:              { from: ['checked_in'], to: 'in_progress', by: ['hospital'], permission: 'queue:manage' },

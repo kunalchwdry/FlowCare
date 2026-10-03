@@ -10,9 +10,9 @@ import path from 'node:path';
 import { SEED } from './seed';
 import { FACTS } from './facts';
 import type {
-  AuditEvent, CorrectionReview, FacilityFacts, NewCareContext, NewCorrection,
-  NewAppointmentRequest, NewFollowUpTask, NewReport, NewReview, NewVisitRecord, Repo,
-  TransitionInput,
+  AuditEvent, CorrectionReview, FacilityFacts, NewAppointmentMessage, NewCareContext,
+  NewCorrection, NewAppointmentRequest, NewFollowUpTask, NewReport, NewReview,
+  NewVisitRecord, Repo, TransitionInput,
 } from './repo';
 import { plan, TransitionError } from '@/lib/appointments/stateMachine';
 import { assertAdministrative } from '@/lib/journey/prep';
@@ -20,7 +20,7 @@ import type {
   AccessibilityComponent, Appointment, CareContext, ClinicSession,
   FacilityCorrection, Favorite, FollowUpTask, Hospital, HospitalReview,
   ModerationEvent, QueueSnapshot, ReviewReport, SchemeListing,
-  ServiceVerification, VisitRecord, AppointmentEvent, Notification,
+  ServiceVerification, VisitRecord, AppointmentEvent, AppointmentMessage, Notification,
 } from '@/lib/types';
 
 interface MutableState {
@@ -38,6 +38,7 @@ interface MutableState {
   corrections: FacilityCorrection[];
   /** Audit trail for appointment transitions. Append-only. */
   appointmentEvents: AppointmentEvent[];
+  appointmentMessages: AppointmentMessage[];
   notifications: Notification[];
 }
 
@@ -48,7 +49,7 @@ function emptyState(): MutableState {
   return {
     appointments: [], favorites: [], reviews: [...SEED.reviews], reports: [], moderationEvents: [], audit: [],
     careContexts: [], visitRecords: [], followUpTasks: [], corrections: [],
-      appointmentEvents: [], notifications: [],
+      appointmentEvents: [], appointmentMessages: [], notifications: [],
   };
 }
 
@@ -96,7 +97,7 @@ function notify(
   // The hospital side only needs telling about things the patient initiated.
   const forHospital: Record<string, { title: string; body: string }> = {
     accept_reschedule: { title: 'Patient accepted the new time', body: 'A proposed time was accepted.' },
-    decline_reschedule: { title: 'Patient declined the new time', body: 'A proposed time was declined and the appointment is cancelled.' },
+    decline_reschedule: { title: 'Patient declined the new time', body: 'The patient kept the original appointment time.' },
     cancel: { title: 'Appointment cancelled', body: reason ? `Cancelled: ${reason}` : 'An appointment was cancelled.' },
   };
   const h = forHospital[action];
@@ -277,6 +278,9 @@ export const demoRepo: Repo = {
     });
 
     const now = new Date().toISOString();
+    const priorProposedSessionId = row.proposedSessionId ?? null;
+    const priorProposedFor = row.proposedFor ?? null;
+    const priorStatus = row.status;
 
     // Accepting a proposed time moves the booking onto that session, so the
     // seat has to be available there too. Checked here rather than in the
@@ -310,6 +314,29 @@ export const demoRepo: Repo = {
     if (decided.to === 'completed') row.completedAt = now;
     if (decided.reason) row.decisionReason = decided.reason;
 
+    if (decided.action === 'propose_reschedule') {
+      s.appointmentMessages.push({
+        id: uid('msg'), appointmentId: row.id, senderSide: 'hospital', senderId: input.actorId,
+        kind: 'time_proposal', body: decided.reason ?? 'The hospital suggested a different time.',
+        proposedSessionId: row.proposedSessionId, proposedFor: row.proposedFor,
+        previousStatus: priorStatus, proposalStatus: 'pending', createdAt: now,
+      });
+    } else if (decided.action === 'accept_reschedule' || decided.action === 'decline_reschedule') {
+      const proposal = [...s.appointmentMessages]
+        .reverse()
+        .find((m) => m.appointmentId === row.id && m.kind === 'time_proposal' && m.proposalStatus === 'pending');
+      if (proposal) proposal.proposalStatus = decided.action === 'accept_reschedule' ? 'accepted' : 'declined';
+      s.appointmentMessages.push({
+        id: uid('msg'), appointmentId: row.id, senderSide: 'patient', senderId: input.actorId,
+        kind: 'time_response',
+        body: decided.action === 'accept_reschedule'
+          ? 'I accepted the hospital\'s suggested time.'
+          : 'I declined the hospital\'s suggested time and kept the original appointment.',
+        proposedSessionId: priorProposedSessionId, proposedFor: priorProposedFor,
+        previousStatus: priorStatus, proposalStatus: decided.action === 'accept_reschedule' ? 'accepted' : 'declined', createdAt: now,
+      });
+    }
+
     s.appointmentEvents.push({
       id: uid('evt'),
       appointmentId: row.id,
@@ -332,6 +359,27 @@ export const demoRepo: Repo = {
     return load()
       .appointmentEvents.filter((e) => e.appointmentId === appointmentId)
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
+  async listAppointmentMessages(appointmentId: string): Promise<AppointmentMessage[]> {
+    return load()
+      .appointmentMessages.filter((m) => m.appointmentId === appointmentId)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
+  async sendAppointmentMessage(input: NewAppointmentMessage): Promise<AppointmentMessage> {
+    const s = load();
+    const appointment = [...SEED.appointments, ...s.appointments].find((a) => a.id === input.appointmentId);
+    if (!appointment) throw new Error('NOT_FOUND');
+    if (input.senderSide === 'patient' && appointment.patientId !== input.senderId) throw new Error('NOT_FOUND');
+    if (input.body.trim().length === 0 || input.body.trim().length > 1000) throw new Error('INVALID_INPUT');
+    const message: AppointmentMessage = {
+      id: uid('msg'), appointmentId: input.appointmentId, senderSide: input.senderSide,
+      senderId: input.senderId, kind: 'message', body: input.body.trim(), createdAt: new Date().toISOString(),
+    };
+    s.appointmentMessages.push(message);
+    save();
+    return { ...message };
   },
 
   async listNotifications(audience, recipientId): Promise<Notification[]> {

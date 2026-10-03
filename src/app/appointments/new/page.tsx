@@ -78,7 +78,7 @@ export default async function NewAppointmentPage({
 
       <section className="fc-card p-5">
         <h2 className="text-sm font-bold">
-          Available sessions {department && <span className="text-ink-500">· {label(department)}</span>}
+          Choose a date and time {department && <span className="text-ink-500">· {label(department)}</span>}
         </h2>
         <p className="mt-0.5 text-[11px] text-ink-500">
           FlowCare session data, computed {formatDateTime(availability.computedAt)}.
