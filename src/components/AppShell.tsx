@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
-  IconCalendar, IconCompare, IconHeart, IconList, IconMap, IconSearch, IconSparkles,
+  IconCalendar, IconCompare, IconHeart, IconList, IconMap, IconMessage, IconSearch, IconSparkles,
 } from './Icons';
 import { FlowCareLogo } from '@/components/Brand';
 
@@ -69,6 +69,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/messages"
+              aria-label="Messages"
+              className="fc-btn-secondary !min-h-[38px] !px-2.5 text-xs"
+            >
+              <IconMessage width={16} height={16} />
+              <span>Messages</span>
+            </Link>
             {ACCOUNT_NAV.map((l) => (
               <Link
                 key={l.href}
