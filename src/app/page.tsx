@@ -95,14 +95,6 @@ export default function HomePage() {
                 Get started
               </Link>
             </div>
-            <div className="mt-4">
-              <Link
-                href="/staff/login"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink-600 underline-offset-4 hover:text-brand-700 hover:underline"
-              >
-                I&rsquo;m hospital staff →
-              </Link>
-            </div>
           </div>
 
           {/* Illustrative product panel. Deliberately schematic, not a fake

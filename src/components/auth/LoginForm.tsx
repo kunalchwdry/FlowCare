@@ -154,15 +154,14 @@ export function LoginForm({
 
         <SubmitButton busy={busy} busyLabel="Signing you in…">Sign in</SubmitButton>
 
-        <p className="text-center text-xs text-ink-500">
-          {isStaff ? 'Not staff? ' : 'Are you hospital staff? '}
-          <Link
-            href={isStaff ? '/patient/login' : '/staff/login'}
-            className="font-semibold text-ink-700 underline-offset-4 hover:underline"
-          >
-            {isStaff ? 'Patient sign in' : 'Use the staff door'}
-          </Link>
-        </p>
+        {isStaff && (
+          <p className="text-center text-xs text-ink-500">
+            Not staff?{' '}
+            <Link href="/patient/login" className="font-semibold text-ink-700 underline-offset-4 hover:underline">
+              Patient sign in
+            </Link>
+          </p>
+        )}
       </form>
     </AuthShell>
   );
