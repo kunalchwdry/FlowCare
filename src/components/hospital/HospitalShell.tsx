@@ -28,6 +28,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/hospital', label: 'Dashboard', ready: true },
   { href: '/hospital/appointments', label: 'Appointments', needs: 'appointments:read', ready: true },
+  { href: '/hospital/messages', label: 'Messages', needs: 'appointments:read', ready: true },
   { href: '/hospital/queue', label: 'Queue', needs: 'queue:read', ready: true },
   { href: '/hospital/patients', label: 'Patients', needs: 'appointments:read', ready: true },
   { href: '/hospital/reviews', label: 'Reviews', needs: 'reviews:moderate', ready: true },
