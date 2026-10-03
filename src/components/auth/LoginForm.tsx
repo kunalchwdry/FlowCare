@@ -56,6 +56,12 @@ export function LoginForm({
       // in through the staff door with a patient account, send them to the
       // patient area rather than a permission error.
       const actual = j?.data?.user?.role ?? 'patient';
+      const flowcareReviewer = Boolean(j?.data?.user?.flowcareReviewer);
+      if (flowcareReviewer) {
+        router.push('/admin/hospital-registrations');
+        router.refresh();
+        return;
+      }
       // `actual` is the role the SERVER resolved, not the door that was
       // used: signing in at the hospital entrance with a patient account
       // still lands on the patient side rather than a portal that would

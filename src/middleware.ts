@@ -84,8 +84,21 @@ export async function middleware(request: NextRequest) {
    */
   const host = request.headers.get('host') ?? '';
   const { pathname } = request.nextUrl;
+  // These are shared public doors. They must remain on their real routes:
+  // a staff member without access needs /staff/register to request access,
+  // not a rewritten /hospital/staff/register route that does not exist.
+  const sharedStaffDoor = pathname === '/staff/login' || pathname === '/staff/register';
+  const sharedRecoveryDoor =
+    pathname === '/forgot-password' ||
+    pathname === '/forgot-password/sent' ||
+    pathname === '/auth/callback' ||
+    pathname === '/reset-password';
+  const sharedReviewerDoor = pathname === '/admin/hospital-registrations';
   if (
     isHospitalHost(host) &&
+    !sharedStaffDoor &&
+    !sharedRecoveryDoor &&
+    !sharedReviewerDoor &&
     !pathname.startsWith('/hospital') &&
     !pathname.startsWith('/api') &&
     !pathname.startsWith('/_next')
@@ -105,7 +118,12 @@ export async function middleware(request: NextRequest) {
    * giving staff a second navigation they must not use and a second
    * FlowCare logo on the sign-in page.
    */
-  if (pathname === '/hospital' || pathname.startsWith('/hospital/')) {
+  if (
+    pathname === '/hospital' ||
+    pathname.startsWith('/hospital/') ||
+    sharedReviewerDoor ||
+    (isHospitalHost(host) && sharedStaffDoor)
+  ) {
     const headers = new Headers(request.headers);
     headers.set('x-flowcare-area', 'hospital');
     return NextResponse.next({ request: { headers } });

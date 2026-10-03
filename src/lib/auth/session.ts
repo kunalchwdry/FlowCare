@@ -13,6 +13,8 @@ export interface SessionUser {
   /** Set for staff/admin bound to a specific hospital. */
   hospitalId: string | null;
   source: 'supabase' | 'demo';
+  /** Explicit FlowCare reviewer flag; separate from hospital membership roles. */
+  flowcareReviewer: boolean;
 }
 
 export const DEMO_COOKIE = 'fc_demo_user';
@@ -57,6 +59,7 @@ export async function getSession(): Promise<SessionUser | null> {
       .select('hospital_id, permissions')
       .eq('user_id', data.user.id)
       .eq('status', 'active')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -76,6 +79,7 @@ export async function getSession(): Promise<SessionUser | null> {
       role,
       hospitalId,
       source: 'supabase',
+      flowcareReviewer: meta.flowcare_reviewer === true || meta.flowcare_reviewer === 'true',
     };
   }
 
@@ -99,6 +103,7 @@ export async function getSession(): Promise<SessionUser | null> {
     role: u.role,
     hospitalId: demoHospitalFor(u.role, 'hospitalId' in u ? (u.hospitalId as string) : null),
     source: 'demo',
+    flowcareReviewer: u.role === 'admin',
   };
 }
 

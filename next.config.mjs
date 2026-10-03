@@ -53,7 +53,12 @@ const nextConfig = {
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'no-referrer' },
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          // The Arena live preview embeds dev servers in an iframe. Keep the
+          // clickjacking protection for production, but do not block the local
+          // preview frame while developing.
+          ...(process.env.NODE_ENV === 'production'
+            ? [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }]
+            : []),
           { key: 'Permissions-Policy', value: 'geolocation=(self), camera=(), microphone=()' },
         ],
       },

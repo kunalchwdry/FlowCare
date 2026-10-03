@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
       .select('hospital_id, permissions')
       .eq('user_id', data.user.id)
       .eq('status', 'active')
+      .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -67,6 +68,8 @@ export async function POST(req: NextRequest) {
         name: (data.user.user_metadata?.full_name as string) ?? data.user.email,
         role,
         hospitalId: membership?.hospital_id ?? null,
+        flowcareReviewer: data.user.app_metadata?.flowcare_reviewer === true
+          || data.user.app_metadata?.flowcare_reviewer === 'true',
       },
     });
   } catch (e) {
