@@ -39,6 +39,31 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Greetings should receive a conversational response instead of being
+    // treated as a hospital keyword search. This stays server-side so every
+    // assistant request still uses the same backend contract and rate limit.
+    if (/^(hi|hello|hey|namaste|good\s+(morning|afternoon|evening))[!.?,\s]*$/i.test(body.query.trim())) {
+      return ok({
+        reply: 'Hi! I can help you find and compare hospitals, departments, accessibility options, and available appointments. What are you looking for?',
+        understood: {
+          filters: {},
+          explanation: [],
+          source: 'deterministic',
+          provider: null,
+          model: null,
+          latencyMs: null,
+        },
+        aiUnavailableReason: null,
+        safetyNotice: null,
+        scopeNotice: SCOPE_NOTICE,
+        locationNotice: null,
+        results: [],
+        total: 0,
+        emptyReason: null,
+        computedAt: new Date().toISOString(),
+      });
+    }
+
     // One application-owned provider. The browser cannot select a vendor or
     // supply a credential; changing providers later is a server-only change.
     const provider = getProvider('gemini');
