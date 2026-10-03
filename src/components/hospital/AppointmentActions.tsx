@@ -112,7 +112,11 @@ export function AppointmentActions({
 
           {actionNeedsSlot(open) && (
             <label className="mt-2 block">
-              <span className="text-[11px] font-semibold text-ink-700">Propose this time</span>
+              <span className="text-[11px] font-semibold text-ink-700">Move to this time</span>
+              <span className="mt-0.5 block text-[10px] text-amber-800">
+                This takes effect immediately — the patient is not asked first.
+                Tell them before you move it.
+              </span>
               <select
                 value={slotId}
                 onChange={(e) => setSlotId(e.target.value)}
