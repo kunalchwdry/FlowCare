@@ -36,7 +36,7 @@ export interface ProviderInfo {
  * available for anything not listed here.
  */
 export const MODEL_CHOICES: Record<string, string[]> = {
-  gemini: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  gemini: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
   groq: [
     'llama-3.3-70b-versatile',
@@ -147,16 +147,26 @@ function openAiCompatible(cfg: {
   };
 }
 
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+/** Gemini 2.0 and 1.5 model ids are retired; do not let a stale deployment
+ * setting silently take every assistant request down. */
+function geminiModel(): string {
+  const configured = s(process.env.GEMINI_MODEL);
+  if (!configured || /^gemini-(?:1\.5|2\.0)-/i.test(configured)) return DEFAULT_GEMINI_MODEL;
+  return configured;
+}
+
 const gemini: LlmProvider = {
   id: 'gemini',
   label: 'Google Gemini',
   note: 'Google AI Studio API',
-  model: () => s(process.env.GEMINI_MODEL) ?? 'gemini-2.0-flash',
+  model: geminiModel,
   isConfigured: () => Boolean(s(process.env.GEMINI_API_KEY)),
   async completeJson({ system, user, timeoutMs, maxOutputTokens = 400, credentials }) {
     const key = credentials?.apiKey ?? s(process.env.GEMINI_API_KEY);
     if (!key) throw new Error('provider_not_configured');
-    const model = credentials?.model ?? s(process.env.GEMINI_MODEL) ?? 'gemini-2.0-flash';
+    const model = credentials?.model ?? geminiModel();
     const json = await postJson(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
       { 'x-goog-api-key': key },
