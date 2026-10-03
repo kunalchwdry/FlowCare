@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     // Greetings should receive a conversational response instead of being
     // treated as a hospital keyword search. This stays server-side so every
     // assistant request still uses the same backend contract and rate limit.
-    if (/^(hi|hello|hey|namaste|good\s+(morning|afternoon|evening))[!.?,\s]*$/i.test(body.query.trim())) {
+    if (/^(hi+|hey|hello+|hie|namaste|good\s+(morning|afternoon|evening))[!.?,\s]*$/i.test(body.query.trim())) {
       return ok({
         reply: 'Hi! I can help you find and compare hospitals, departments, accessibility options, and available appointments. What are you looking for?',
         understood: {
