@@ -53,6 +53,10 @@ export default async function HospitalMessagesPage() {
       messages,
     };
   }))).sort((a, b) => {
+    // Put active conversations first so staff do not have to hunt through
+    // future appointments to find a patient's new message.
+    const activityOrder = Number(b.messages.length > 0) - Number(a.messages.length > 0);
+    if (activityOrder !== 0) return activityOrder;
     const aLast = a.messages.at(-1)?.createdAt ?? a.scheduledFor;
     const bLast = b.messages.at(-1)?.createdAt ?? b.scheduledFor;
     return bLast.localeCompare(aLast);
