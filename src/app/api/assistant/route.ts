@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { EMERGENCY_NOTICE, SCOPE_NOTICE } from '@/lib/ai/notices';
 import { getRepo } from '@/lib/data';
 import { extractIntent } from '@/lib/ai/intent';
-import { getProvider, listProviders } from '@/lib/ai/providers';
+import { getProvider } from '@/lib/ai/providers';
 import { DiscoveryFiltersSchema, type DiscoveryFilters } from '@/lib/discovery/filters';
 import { searchHospitals } from '@/lib/discovery/search';
 import { makeExternalFetcher } from '@/lib/places/enrich';
@@ -19,7 +19,10 @@ export const dynamic = 'force-dynamic';
 
 const Body = z.object({
   query: z.string().min(1).max(400),
-  provider: z.string().max(40).nullish(),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().min(1).max(1200),
+  }).strict()).max(12).default([]),
   location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullish(),
   page: z.number().int().min(1).max(50).optional(),
 }).strict();
@@ -27,7 +30,7 @@ const Body = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const body = Body.parse(await readJson(req, 4000));
+    const body = Body.parse(await readJson(req, 12000));
 
     const rl = rateLimit(`assistant:${clientKey(req)}`, env.aiRateLimitPerMin());
     if (!rl.allowed) {
@@ -36,18 +39,15 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Reject an unknown / unconfigured provider explicitly rather than
-    // silently swapping to another vendor.
-    const known = listProviders();
-    if (body.provider && !known.some((p) => p.id === body.provider)) {
-      return fail(400, 'Unknown AI provider.');
-    }
-    const provider = getProvider(body.provider ?? null);
+    // One application-owned provider. The browser cannot select a vendor or
+    // supply a credential; changing providers later is a server-only change.
+    const provider = getProvider('gemini');
 
     const intent = await extractIntent(body.query, {
       provider,
       timeoutMs: env.aiTimeoutMs(),
       maxChars: env.aiMaxInputChars(),
+      history: body.history,
     });
 
     // --- Map validated AI filters onto the discovery filter schema ---------
@@ -86,8 +86,13 @@ export async function POST(req: NextRequest) {
         ? 'You asked for hospitals near you but location access is not available. Showing results without a distance filter — you can search by city or area instead.'
         : null;
 
+    const reply = outcome.total > 0
+      ? `I found ${outcome.total} hospital${outcome.total === 1 ? '' : 's'} matching your request. Review the verified details below.`
+      : 'I could not find a matching hospital with the information available. Try a broader department, city, or availability request.';
+
     return ok({
       // Everything below is derived from retrieved data, never model prose.
+      reply,
       understood: {
         filters,
         explanation: intent.notes,

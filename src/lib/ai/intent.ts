@@ -7,38 +7,19 @@
  * name a hospital, emit SQL, choose a sort order, or set pagination. Any
  * deviation causes the whole LLM result to be discarded.
  */
-import { AiFilterSchema, SPECIALTIES, SERVICES, HOSPITAL_TYPES, ACCESSIBILITY_FEATURES, LANGUAGES, type AiFilters } from '@/lib/discovery/filters';
+import { AiFilterSchema, type AiFilters } from '@/lib/discovery/filters';
 import { parseQueryDeterministic, type FallbackParse } from './fallback';
 import type { LlmProvider, ProviderCredentials } from './providers';
+import { FLOWCARE_SEARCH_SYSTEM_PROMPT } from './prompts';
 
-export const INTENT_SYSTEM_PROMPT = `You convert a patient's hospital-search phrase into a JSON filter object for a hospital DIRECTORY.
+/** Kept as a named export for existing callers and tests. */
+export const INTENT_SYSTEM_PROMPT = FLOWCARE_SEARCH_SYSTEM_PROMPT;
 
-You are a directory search assistant. You must NOT diagnose, must NOT suggest treatment, must NOT assess urgency or severity, and must NOT name any hospital, doctor, brand or place. You only translate the phrase into filters.
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
-Return ONLY a JSON object with any subset of these keys:
-- "specialties": array of ${JSON.stringify(SPECIALTIES)}
-- "services": array of ${JSON.stringify(SERVICES)}
-- "hospitalTypes": array of ${JSON.stringify(HOSPITAL_TYPES)}
-- "accessibility": array of ${JSON.stringify(ACCESSIBILITY_FEATURES)}
-- "languages": array of ${JSON.stringify(LANGUAGES)}
-- "city": string (city name only, e.g. "Pune")
-- "area": string (locality within a city)
-- "useUserLocation": boolean (true only if the phrase says near me / nearby / close to me)
-- "radiusKm": number 1-100
-- "availability": array of ["available","limited","none","unknown"]
-- "availableWithinDays": integer 1-60 (today=1, tomorrow=2, this week=7)
-- "minFlowcareRating": number 1-5
-- "minGoogleRating": number 1-5
-- "minReviewCount": integer
-- "openNow": boolean
-- "emergencyServices": boolean
-- "preference": { "prioritise": array of ["distance","rating","availability","review_count","accessibility","language"] }
-
-Rules:
-- Map lay words to the closest listed specialty (heart -> cardiology, skin -> dermatology).
-- Never invent coordinates. Express "near me" only with useUserLocation.
-- Omit any key you are not confident about. An empty object {} is a valid answer.
-- Output raw JSON only, no prose, no markdown fences.`;
 
 export type IntentSource = 'llm' | 'deterministic' | 'llm_rejected_fallback';
 
@@ -86,12 +67,21 @@ export async function extractIntent(
     provider: LlmProvider | null;
     timeoutMs: number;
     maxChars: number;
-    /** Bring-your-own-key credentials; when present the user pays, not us. */
+    /** Recent turns from the current browser session only. */
+    history?: ConversationMessage[];
+    /** Server-managed credentials; never supplied by the browser. */
     credentials?: ProviderCredentials;
   },
 ): Promise<IntentResult> {
   const trimmed = (query ?? '').slice(0, opts.maxChars);
   const deterministic: FallbackParse = parseQueryDeterministic(trimmed);
+  const context = (opts.history ?? [])
+    .slice(-8)
+    .map((turn) => `${turn.role === 'user' ? 'User' : 'FlowCare'}: ${turn.content.slice(0, 800)}`)
+    .join('\n');
+  const modelInput = context
+    ? `Conversation context from this browser session:\n${context}\n\nLatest user request:\n${trimmed}`
+    : trimmed;
 
   if (!opts.provider) {
     return {
@@ -116,7 +106,7 @@ export async function extractIntent(
       opts.provider.completeJson({
         credentials: opts.credentials,
         system: INTENT_SYSTEM_PROMPT,
-        user: trimmed,
+        user: modelInput,
         timeoutMs: opts.timeoutMs,
         maxOutputTokens: 400,
       }),

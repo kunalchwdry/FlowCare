@@ -20,7 +20,7 @@ const NAV = [
 /** Secondary links: account + keys live in the header, not the bottom bar. */
 const ACCOUNT_NAV = [
   { href: '/account', label: 'Account' },
-  { href: '/settings', label: 'AI keys' },
+  { href: '/settings', label: 'AI settings' },
 ];
 
 interface Config {

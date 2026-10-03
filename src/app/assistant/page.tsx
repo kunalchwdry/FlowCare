@@ -10,9 +10,10 @@ import { formatDateTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
-interface ProviderInfo { id: string; label: string; note: string; configured: boolean; model: string }
+interface ConversationMessage { role: 'user' | 'assistant'; content: string }
 
 interface AssistantResponse {
+  reply: string;
   understood: {
     filters: Record<string, unknown>;
     explanation: string[];
@@ -43,9 +44,8 @@ const EXAMPLES = [
 export default function AssistantPage() {
   const sessionId = useSessionId();
   const geo = useGeolocation();
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [provider, setProvider] = useState<string>('');
-  const [anyConfigured, setAnyConfigured] = useState(true);
+  const [anyConfigured, setAnyConfigured] = useState(false);
+  const [history, setHistory] = useState<ConversationMessage[]>([]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<AssistantResponse | null>(null);
@@ -54,28 +54,28 @@ export default function AssistantPage() {
   useEffect(() => {
     fetch('/api/assistant/providers')
       .then((r) => r.json())
-      .then((j) => {
-        setProviders(j.data.providers);
-        setAnyConfigured(j.data.anyConfigured);
-        const def = j.data.providers.find((p: ProviderInfo) => p.id === j.data.defaultProvider && p.configured)
-          ?? j.data.providers.find((p: ProviderInfo) => p.configured);
-        setProvider(def?.id ?? '');
-      })
-      .catch(() => {});
+      .then((j) => setAnyConfigured(Boolean(j.data?.anyConfigured)))
+      .catch(() => setAnyConfigured(false));
   }, []);
 
   const ask = async (q: string) => {
     if (!q.trim()) return;
     setBusy(true); setError(null);
     try {
-      const res = await fetch('/api/assistant', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-flowcare-session': sessionId },
-        body: JSON.stringify({ query: q, provider: provider || null, location: geo.point }),
+        body: JSON.stringify({ message: q, history, location: geo.point }),
       });
       const j = await res.json();
       if (!res.ok) { setError(j.error?.message ?? 'The assistant could not run that search.'); return; }
       setData(j.data);
+      const nextHistory: ConversationMessage[] = [
+        ...history,
+        { role: 'user', content: q.trim() },
+        { role: 'assistant', content: j.data.reply },
+      ];
+      setHistory(nextHistory.slice(-12));
       trackEvent('assistant_query', sessionId, { result_count: j.data.total });
     } catch {
       setError('Could not reach the assistant. You can still search with filters.');
@@ -93,6 +93,15 @@ export default function AssistantPage() {
             <h1 className="text-lg font-extrabold leading-tight">FlowCare Hospital Assistant</h1>
             <p className="text-xs text-ink-500">Finds and filters hospitals. It does not give medical advice.</p>
           </div>
+          {history.length > 0 && (
+            <button
+              type="button"
+              onClick={() => { setHistory([]); setData(null); setError(null); setQuery(''); }}
+              className="ml-auto fc-btn-secondary !min-h-[32px] !px-2.5 text-[11px]"
+            >
+              New search
+            </button>
+          )}
         </div>
 
         <p className="mt-3 rounded-xl bg-ink-100 px-3 py-2.5 text-[11px] leading-relaxed text-ink-600">
@@ -120,21 +129,9 @@ export default function AssistantPage() {
           </div>
 
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-[11px] text-ink-500">
-              AI provider
-              <select
-                className="rounded-lg border border-ink-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-ink-800"
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-              >
-                <option value="">FlowCare parser (no AI)</option>
-                {providers.map((p) => (
-                  <option key={p.id} value={p.id} disabled={!p.configured}>
-                    {p.label}{p.configured ? ` · ${p.model}` : ' · not configured'}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <span className="rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 text-[11px] font-semibold text-violet-800">
+              FlowCare AI · server-managed Gemini
+            </span>
 
             <button
               onClick={geo.request}
@@ -146,7 +143,7 @@ export default function AssistantPage() {
 
           {!anyConfigured && (
             <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900 ring-1 ring-amber-200">
-              No AI provider is configured on this deployment. The assistant is using FlowCare&apos;s deterministic parser,
+              The application Gemini key is not configured on this deployment yet. FlowCare is using its deterministic parser,
               which understands departments, locations, availability, ratings, accessibility and language requests.
             </p>
           )}
@@ -179,6 +176,11 @@ export default function AssistantPage() {
           {data.locationNotice && (
             <p className="rounded-xl bg-ink-100 px-3 py-2.5 text-xs text-ink-700">{data.locationNotice}</p>
           )}
+
+          <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+            <p className="text-sm font-semibold text-violet-950">FlowCare AI</p>
+            <p className="mt-1 text-sm leading-relaxed text-violet-900">{data.reply}</p>
+          </div>
 
           <section className="fc-card p-4">
             <h2 className="text-sm font-bold">What FlowCare searched for</h2>
