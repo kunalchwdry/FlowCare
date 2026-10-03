@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createClaim, storageIsDurable } from '@/lib/hospital/claims';
 import { dnsToken, planVerification } from '@/lib/hospital/verification';
 import { getRepo } from '@/lib/data';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { fail, handleError, ok, readJson } from '@/lib/http';
 import { clientKey, rateLimit } from '@/lib/ratelimit';
 
@@ -15,42 +16,44 @@ const Body = z
     hospitalId: z.string().max(120).nullish(),
     proposedName: z.string().max(140).nullish(),
     proposedCity: z.string().max(80).nullish(),
-    contactName: z.string().min(2).max(80),
+    address: z.string().max(240).nullish(),
+    website: z.string().url().max(240).nullish(),
+    contactName: z.string().min(2).max(120),
     contactEmail: z.string().email().max(200),
     contactPhone: z.string().max(30).nullish(),
     statedRole: z.string().min(2).max(80),
     evidenceNote: z.string().max(400).nullish(),
+    licenseNumber: z.string().max(120).nullish(),
+    licenseAuthority: z.string().max(160).nullish(),
+    licenseExpiresOn: z.string().date().nullish(),
   })
   .strict()
   .refine((v) => Boolean(v.hospitalId) !== Boolean(v.proposedName), {
     message: 'Either choose a listed hospital or give the name of one to add — not both.',
   });
 
+function isUuid(value: string | null | undefined): boolean {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+}
+
 /**
- * Submit a claim over a hospital.
+ * Submit a hospital onboarding application.
  *
- * This endpoint cannot grant access. It writes a row with status 'pending'
- * and returns; there is no branch in it, or in createClaim, that produces a
- * membership. Taking control of a facility's published information and its
- * patients' appointments has to involve a person checking who the claimant
- * actually is, and an HTTP request is not that.
- *
- * Open to signed-out callers on purpose: the whole point is that nobody at
- * the hospital has an account yet.
+ * A submission is deliberately separate from a membership: it never grants
+ * portal access. In Supabase mode the write goes through the public RPC from
+ * migration 0009, which is the only write path available to signed-out
+ * callers. Local/demo mode keeps the older file-backed claim store so the
+ * form remains testable before migrations are applied.
  */
 export async function POST(req: NextRequest) {
   try {
-    // Tighter than the usual limit. This is unauthenticated and creates
-    // review work for a human, so the cost of abuse lands on people.
     const rl = rateLimit(`hospital-claim:${clientKey(req)}`, 3);
     if (!rl.allowed) {
       return fail(429, 'Too many submissions. Please wait a minute.', { retryInMs: rl.resetInMs });
     }
 
-    const body = Body.parse(await readJson(req, 3000));
+    const body = Body.parse(await readJson(req, 4000));
 
-    // If a hospital id is named it has to be real — otherwise a claim could
-    // be filed against an id that does not exist and sit in the queue.
     let hospitalName: string | null = null;
     let verification: ReturnType<typeof planVerification> | null = null;
     if (body.hospitalId) {
@@ -58,11 +61,69 @@ export async function POST(req: NextRequest) {
       const hospital = await repo.getHospital(body.hospitalId);
       if (!hospital) return fail(404, 'That hospital is not listed on FlowCare.');
       hospitalName = hospital.name;
-      // Computed from what FlowCare already holds about the facility, not
-      // from anything in this request body.
       verification = planVerification(hospital, body.contactEmail);
     }
 
+    const supabase = await getSupabaseServerClient();
+    const useSupabase = Boolean(supabase && (isUuid(body.hospitalId) || body.proposedName));
+
+    if (useSupabase && supabase) {
+      const { data, error } = await supabase.rpc('submit_hospital_registration', {
+        p_hospital_id: isUuid(body.hospitalId) ? body.hospitalId : null,
+        p_proposed_name: body.proposedName ?? null,
+        p_proposed_city: body.proposedCity ?? null,
+        p_address: body.address ?? null,
+        p_website: body.website ?? null,
+        p_admin_name: body.contactName,
+        p_admin_email: body.contactEmail,
+        p_admin_phone: body.contactPhone ?? null,
+        p_evidence_note: body.evidenceNote ?? null,
+        p_license_number: body.licenseNumber ?? null,
+        p_license_authority: body.licenseAuthority ?? null,
+        p_license_expires_on: body.licenseExpiresOn ?? null,
+      });
+
+      if (error) {
+        // A local checkout may have the app code before the new migration has
+        // been applied. Keep that checkout usable, but never silently fall
+        // back on Vercel where a file write is not durable.
+        if (process.env.NODE_ENV === 'production') {
+          return fail(503, 'Hospital registration is not enabled on this deployment yet. Apply the FlowCare hospital-registration migration and try again.');
+        }
+      } else {
+        const registration = (data ?? {}) as {
+          id?: string;
+          status?: string;
+          duplicate?: boolean;
+          created_at?: string;
+        };
+        return ok({
+          claim: {
+            id: registration.id ?? 'registration-submitted',
+            status: registration.status ?? 'pending',
+            hospitalName: hospitalName ?? body.proposedName,
+            createdAt: registration.created_at ?? new Date().toISOString(),
+          },
+          duplicate: Boolean(registration.duplicate),
+          verification: verification
+            ? {
+                hospitalDomain: verification.hospitalDomain,
+                emailDomainMatches: verification.emailDomainMatches,
+                routes: verification.routes,
+                dnsRecord: verification.hospitalDomain
+                  ? { host: verification.hospitalDomain, type: 'TXT', value: dnsToken(registration.id ?? 'registration-submitted') }
+                  : null,
+              }
+            : null,
+          durable: true,
+          message: registration.duplicate
+            ? 'We already have this hospital registration. It is still being reviewed.'
+            : 'Registration submitted. A FlowCare reviewer will verify the hospital before portal access is granted.',
+        });
+      }
+    }
+
+    // Demo/local fallback. This path is intentionally labelled non-durable.
     const { claim, duplicate } = await createClaim({
       hospitalId: body.hospitalId ?? null,
       proposedName: body.proposedName ?? null,
@@ -83,12 +144,6 @@ export async function POST(req: NextRequest) {
         createdAt: claim.createdAt,
       },
       duplicate,
-      /*
-       * What happens next, concretely. Returned so the claimant can start
-       * the strongest route immediately rather than waiting to be told.
-       * The TXT token is safe to publish: it proves control of a domain
-       * only when it appears IN that domain's DNS.
-       */
       verification: verification
         ? {
             hospitalDomain: verification.hospitalDomain,
@@ -99,12 +154,10 @@ export async function POST(req: NextRequest) {
               : null,
           }
         : null,
-      // Said plainly rather than implied, and never "we have emailed you":
-      // no mail provider is configured on this deployment.
       durable: storageIsDurable(),
       message: duplicate
-        ? 'We already have this claim. It is still being reviewed.'
-        : 'Claim submitted. A FlowCare reviewer has to verify it before any access is granted.',
+        ? 'We already have this hospital registration. It is still being reviewed.'
+        : 'Registration submitted. A FlowCare reviewer will verify the hospital before portal access is granted.',
     });
   } catch (e) {
     return handleError(e);
