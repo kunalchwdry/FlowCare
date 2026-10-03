@@ -1,6 +1,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { translate, looksLikeEmergency, EMERGENCY_NOTICE } from '@/lib/journey/translator';
+import { FLOWCARE_AGENT_SYSTEM_PROMPT } from './prompts';
 
 /**
  * fc-agent-v1 — the agentic booking workflow.
@@ -115,18 +116,7 @@ export const AgentIntentSchema = z
 
 export type AgentIntent = z.infer<typeof AgentIntentSchema>;
 
-export const AGENT_SYSTEM_PROMPT = `You convert a patient's request into a small JSON object for a hospital DIRECTORY search.
-
-Return ONLY JSON matching exactly this shape:
-{"careNeed": string|null, "locality": string|null, "city": string|null, "preferredWhen": "asap"|"today"|"tomorrow"|"this_week"|"any"|null, "forDependentName": string|null}
-
-Rules:
-- careNeed is the body part, service or department the person mentioned, in plain words (e.g. "leg pain", "dialysis", "eye checkup"). Copy their words; do NOT translate a symptom into a diagnosis.
-- NEVER output a diagnosis, a condition name, a medicine, a test result or any clinical judgement.
-- NEVER invent a hospital name, a doctor name, a date or a time. Those come from the directory, not from you.
-- If the person is booking for someone else and names them, put that name in forDependentName.
-- If you cannot tell what they need, set careNeed to null.
-- Output nothing except the JSON object.`;
+export const AGENT_SYSTEM_PROMPT = FLOWCARE_AGENT_SYSTEM_PROMPT;
 
 /**
  * Turn free text into a care-need translation using FlowCare's own closed

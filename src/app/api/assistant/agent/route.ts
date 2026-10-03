@@ -5,8 +5,8 @@ import {
   buildBookingSummary, emergencyBlock, resolveCareNeed,
   type AgentCandidate, type AgentSlot, type AgentTurn,
 } from '@/lib/ai/agent';
-import { getProviderById } from '@/lib/ai/providers';
-import { resolveProvider, touchUserKey, friendlyProviderError } from '@/lib/ai/userKeys';
+import { getProvider } from '@/lib/ai/providers';
+import { friendlyProviderError } from '@/lib/ai/userKeys';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { env } from '@/lib/env';
 import { fail, handleError, ok, readJson } from '@/lib/http';
@@ -49,10 +49,11 @@ export async function POST(req: NextRequest) {
       return fail(401, 'Sign in so the assistant can book on your behalf.');
     }
 
-    // ---- who pays for the model call -------------------------------------
-    const resolved = await resolveProvider(body.provider ?? null);
-    const provider = getProviderById(resolved.providerId);
-    const usable = provider && (resolved.source === 'user' || resolved.source === 'server');
+    // ---- one application-owned provider -------------------------------
+    // The browser cannot choose a vendor or supply a credential. Switching
+    // to a future FlowCare model remains a server-only provider change.
+    const provider = getProvider('gemini');
+    const usable = Boolean(provider);
 
     // ---- step 1: understand the request ----------------------------------
     let intent: z.infer<typeof AgentIntentSchema> = { careNeed: body.message };
@@ -66,13 +67,11 @@ export async function POST(req: NextRequest) {
           user: body.message,
           timeoutMs: env.aiTimeoutMs(),
           maxOutputTokens: 200,
-          credentials: resolved.credentials,
         });
         const parsed = AgentIntentSchema.safeParse(JSON.parse(stripFences(raw)));
         if (parsed.success) {
           intent = parsed.data;
           aiSource = 'llm';
-          if (resolved.source === 'user') await touchUserKey(resolved.providerId);
         } else {
           // The model produced something outside the allowlist. Drop it
           // entirely rather than partially trusting it.
@@ -84,10 +83,10 @@ export async function POST(req: NextRequest) {
     }
 
     const aiMeta = {
-      provider: usable ? resolved.providerId : null,
-      model: usable ? (resolved.credentials?.model ?? provider!.model()) : null,
+      provider: usable ? 'gemini' : null,
+      model: usable ? provider!.model() : null,
       source: aiSource,
-      keySource: resolved.source,
+      keySource: usable ? 'server' : 'none',
       unavailableReason: unavailable,
     } as const;
 
