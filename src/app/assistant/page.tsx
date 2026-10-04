@@ -98,22 +98,47 @@ export default function AssistantPage() {
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<AssistantResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [speechAvailable, setSpeechAvailable] = useState(false);
+  const [voiceInputAvailable, setVoiceInputAvailable] = useState(false);
+  const [voiceOutputAvailable, setVoiceOutputAvailable] = useState(false);
+  const [voiceLabel, setVoiceLabel] = useState('Feminine browser voice preferred');
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingText, setSpeakingText] = useState<string | null>(null);
   const [autoRead, setAutoRead] = useState(false);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const speechBaseRef = useRef('');
 
   useEffect(() => {
-    const available = Boolean(
-      (window.SpeechRecognition || window.webkitSpeechRecognition) && 'speechSynthesis' in window,
-    );
-    setSpeechAvailable(available);
+    const recognitionAvailable = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const synthesisAvailable = 'speechSynthesis' in window;
+    setVoiceInputAvailable(recognitionAvailable);
+    setVoiceOutputAvailable(synthesisAvailable);
+
+    const feminineHints = /female|woman|girl|zira|samantha|ava|aria|jenny|susan|karen|hazel|libby|sara|sarah|joanna|allison|moira|veena|heera/i;
+    const masculineHints = /male|man|david|mark|george|guy|daniel|alexander/i;
+    const chooseVoice = () => {
+      if (!synthesisAvailable) return;
+      const voices = window.speechSynthesis.getVoices();
+      const englishVoices = voices.filter((voice) => /^en(?:-|$)/i.test(voice.lang));
+      const feminineEnglish = englishVoices.filter((voice) => feminineHints.test(voice.name) && !masculineHints.test(voice.name));
+      const candidates = feminineEnglish.length > 0 ? feminineEnglish : englishVoices;
+      const ranked = candidates.slice().sort((a, b) => {
+        const rank = (voice: SpeechSynthesisVoice) => voice.lang.toLowerCase() === 'en-in' ? 0 : voice.lang.toLowerCase().startsWith('en-') ? 1 : 2;
+        return rank(a) - rank(b);
+      });
+      preferredVoiceRef.current = ranked[0] ?? null;
+      if (feminineEnglish.length > 0 && ranked[0]) setVoiceLabel(`Feminine voice: ${ranked[0].name}`);
+      else if (ranked[0]) setVoiceLabel(`English voice: ${ranked[0].name}`);
+      else setVoiceLabel('Feminine browser voice preferred');
+    };
+
+    chooseVoice();
+    window.speechSynthesis?.addEventListener('voiceschanged', chooseVoice);
     return () => {
       recognitionRef.current?.stop();
       window.speechSynthesis?.cancel();
+      window.speechSynthesis?.removeEventListener('voiceschanged', chooseVoice);
     };
   }, []);
 
@@ -160,7 +185,12 @@ export default function AssistantPage() {
     }
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-IN';
+    if (preferredVoiceRef.current) {
+      utterance.voice = preferredVoiceRef.current;
+      utterance.lang = preferredVoiceRef.current.lang;
+    } else {
+      utterance.lang = 'en-IN';
+    }
     utterance.rate = 0.95;
     utterance.onstart = () => { setIsSpeaking(true); setSpeakingText(text); };
     utterance.onend = () => { setIsSpeaking(false); setSpeakingText(null); };
@@ -249,7 +279,7 @@ export default function AssistantPage() {
               <button
                 type="button"
                 onClick={() => speak('Hi, I am FlowCare\'s hospital assistant. Tell me what kind of hospital or appointment you are looking for and I will search FlowCare\'s verified records.')}
-                disabled={!speechAvailable}
+                disabled={!voiceOutputAvailable}
                 className="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-800 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSpeaking && speakingText?.startsWith('Hi, I am FlowCare') ? <IconStop width={13} height={13} /> : <IconVolume width={13} height={13} />}
@@ -264,7 +294,7 @@ export default function AssistantPage() {
                   <button
                     type="button"
                     onClick={() => speak(message.content)}
-                    disabled={!speechAvailable}
+                    disabled={!voiceOutputAvailable}
                     className="mt-2 inline-flex min-h-[30px] items-center gap-1.5 rounded-full bg-ink-50 px-2.5 py-1 text-[10px] font-bold text-ink-600 transition hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isSpeaking && speakingText === message.content ? <IconStop width={12} height={12} /> : <IconVolume width={12} height={12} />}
@@ -315,12 +345,13 @@ export default function AssistantPage() {
                 <div>
                   <p className="text-xs font-extrabold text-ink-900">Talk to FlowCare</p>
                   <p className="text-[10px] text-ink-500">Speak your request or listen to the assistant</p>
+                  <p className="mt-0.5 text-[10px] font-semibold text-violet-700">{voiceLabel}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={toggleListening}
-                disabled={!speechAvailable}
+                disabled={!voiceInputAvailable}
                 aria-pressed={isListening}
                 className={`inline-flex min-h-[34px] items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-bold transition ${isListening ? 'bg-rose-600 text-white shadow-sm' : 'bg-violet-600 text-white hover:bg-violet-700'} disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-500`}
               >
@@ -330,7 +361,7 @@ export default function AssistantPage() {
               <button
                 type="button"
                 onClick={() => data?.reply && speak(data.reply)}
-                disabled={!speechAvailable || !data?.reply}
+                disabled={!voiceOutputAvailable || !data?.reply}
                 className="inline-flex min-h-[34px] items-center gap-1.5 rounded-xl border border-violet-200 bg-white px-3 py-1.5 text-[11px] font-bold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSpeaking ? <IconStop width={14} height={14} /> : <IconVolume width={14} height={14} />}
@@ -341,7 +372,7 @@ export default function AssistantPage() {
                 Auto-read
               </label>
             </div>
-            {!speechAvailable && (
+            {!voiceInputAvailable && !voiceOutputAvailable && (
               <p className="mb-2 text-[10px] text-ink-500">Voice controls are unavailable in this browser. You can still type your request.</p>
             )}
             <div className="flex items-end gap-2 rounded-2xl border border-ink-300 bg-white p-1.5 shadow-sm focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
