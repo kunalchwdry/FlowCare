@@ -14,6 +14,7 @@ const ChatBody = z.object({
   }).strict()).max(12).default([]),
   location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullish(),
   page: z.number().int().min(1).max(50).optional(),
+  language: z.enum(['en', 'hi']).default('en'),
 }).strict();
 
 /**
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
         history: body.history,
         location: body.location,
         page: body.page,
+        language: body.language,
       }),
     });
     return assistantPost(rewritten);
