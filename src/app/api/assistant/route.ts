@@ -50,7 +50,9 @@ export async function POST(req: NextRequest) {
     // assistant request still uses the same backend contract and rate limit.
     if (/^(hi+|hey|hello+|hie|namaste|good\s+(morning|afternoon|evening))[!.?,\s]*$/i.test(body.query.trim())) {
       return ok({
-        reply: 'Hi! I can help you find and compare hospitals, departments, accessibility options, and available appointments. What are you looking for?',
+        reply: body.language === 'hi'
+          ? 'नमस्ते! मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाओं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। आप क्या ढूंढ रहे हैं?'
+          : 'Hi! I can help you find and compare hospitals, departments, accessibility options, and available appointments. What are you looking for?',
         understood: {
           filters: {},
           explanation: [],
@@ -77,7 +79,9 @@ export async function POST(req: NextRequest) {
     // missing, expired, or unavailable on a Vercel preview deployment.
     if (IMMEDIATE_HELP_QUERY.test(normalizedQuery)) {
       return ok({
-        reply: 'This may need urgent medical attention. Call 112 in India or go to the nearest emergency department now. Do not wait for FlowCare to find a routine appointment.',
+        reply: body.language === 'hi'
+          ? 'यह तुरंत चिकित्सा सहायता की जरूरत हो सकती है। भारत में 112 पर कॉल करें या अभी निकटतम आपातकालीन विभाग जाएं। FlowCare की नियमित अपॉइंटमेंट खोज का इंतजार न करें।'
+          : 'This may need urgent medical attention. Call 112 in India or go to the nearest emergency department now. Do not wait for FlowCare to find a routine appointment.',
         understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
         aiUnavailableReason: null,
         safetyNotice: EMERGENCY_NOTICE,
@@ -89,7 +93,9 @@ export async function POST(req: NextRequest) {
 
     if (EMOTIONAL_SUPPORT_QUERY.test(normalizedQuery)) {
       return ok({
-        reply: 'I\'m sorry you\'re feeling this way. If you are safe right now, I can help you find a mental-health professional or psychiatry department. If you might hurt yourself or are in immediate danger, call 112 or go to the nearest emergency department now.',
+        reply: body.language === 'hi'
+          ? 'मुझे दुख है कि आप ऐसा महसूस कर रहे हैं। अगर आप अभी सुरक्षित हैं, तो मैं मानसिक स्वास्थ्य विशेषज्ञ या मनोचिकित्सा विभाग खोजने में मदद कर सकता हूँ। अगर आपको खुद को नुकसान पहुंचाने का डर है या आप तत्काल खतरे में हैं, तो 112 पर कॉल करें या निकटतम आपातकालीन विभाग जाएं।'
+          : 'I\'m sorry you\'re feeling this way. If you are safe right now, I can help you find a mental-health professional or psychiatry department. If you might hurt yourself or are in immediate danger, call 112 or go to the nearest emergency department now.',
         understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
         aiUnavailableReason: null,
         safetyNotice: EMOTIONAL_SUPPORT_NOTICE,
@@ -104,7 +110,9 @@ export async function POST(req: NextRequest) {
     // into the generic no-hospital result.
     if (GENERAL_SCOPE_QUERY.test(normalizedQuery) && !DIRECTORY_QUERY.test(normalizedQuery)) {
       return ok({
-        reply: 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.',
+        reply: body.language === 'hi'
+          ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
+          : 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.',
         understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
         aiUnavailableReason: null,
         safetyNotice: null,
@@ -122,9 +130,13 @@ export async function POST(req: NextRequest) {
     ) {
       const hasLocation = Boolean(body.location);
       return ok({
-        reply: hasLocation
-          ? 'Your device location is available to FlowCare for nearby-hospital searches. For privacy, I do not display your exact coordinates or street address here.'
-          : 'I do not have your device location yet. Tap Use my location below, allow browser access, and ask me again. You can also search by city or area.',
+        reply: body.language === 'hi'
+          ? (hasLocation
+            ? 'आपके डिवाइस की लोकेशन पास के अस्पताल खोजने के लिए उपलब्ध है। आपकी निजता के लिए मैं यहां सटीक निर्देशांक या पता नहीं दिखाता।'
+            : 'मेरे पास अभी आपके डिवाइस की लोकेशन नहीं है। नीचे Use my location दबाएं, ब्राउज़र की अनुमति दें और फिर पूछें। आप शहर या क्षेत्र से भी खोज सकते हैं।')
+          : (hasLocation
+            ? 'Your device location is available to FlowCare for nearby-hospital searches. For privacy, I do not display your exact coordinates or street address here.'
+            : 'I do not have your device location yet. Tap Use my location below, allow browser access, and ask me again. You can also search by city or area.'),
         understood: {
           filters: {},
           explanation: [],
@@ -191,9 +203,13 @@ export async function POST(req: NextRequest) {
         ? 'You asked for hospitals near you but location access is not available. Showing results without a distance filter — you can search by city or area instead.'
         : null;
 
-    const reply = outcome.total > 0
-      ? `I found ${outcome.total} hospital${outcome.total === 1 ? '' : 's'} matching your request. Review the verified details below.`
-      : 'I could not find a matching hospital with the information available. Try a broader department, city, or availability request.';
+    const reply = body.language === 'hi'
+      ? (outcome.total > 0
+        ? `आपके अनुरोध से मेल ${outcome.total} अस्पताल${outcome.total === 1 ? '' : 'ों'} मिला। नीचे सत्यापित विवरण देखें।`
+        : 'उपलब्ध जानकारी के आधार पर कोई मेल खाता अस्पताल नहीं मिला। विभाग, शहर या उपलब्धता से जुड़ी विस्तृत खोज करें।')
+      : (outcome.total > 0
+        ? `I found ${outcome.total} hospital${outcome.total === 1 ? '' : 's'} matching your request. Review the verified details below.`
+        : 'I could not find a matching hospital with the information available. Try a broader department, city, or availability request.');
 
     return ok({
       // Everything below is derived from retrieved data, never model prose.
