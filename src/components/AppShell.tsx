@@ -7,6 +7,7 @@ import {
   IconCalendar, IconCompare, IconHeart, IconList, IconMap, IconMessage, IconSearch,
 } from './Icons';
 import { FlowCareLogo } from '@/components/Brand';
+import { FloatingAssistant } from '@/components/FloatingAssistant';
 
 const NAV = [
   { href: '/hospitals', label: 'Discover', Icon: IconSearch },
@@ -113,6 +114,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </div>
       </nav>
+
+      <FloatingAssistant />
 
       <footer className="hidden border-t border-ink-200 bg-white px-4 py-6 md:block">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-500">
