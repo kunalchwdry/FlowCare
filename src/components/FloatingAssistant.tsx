@@ -116,7 +116,7 @@ export function FloatingAssistant() {
   function pickVoice(lang: VoiceLanguage): SpeechSynthesisVoice | undefined {
     const voices = voicesRef.current;
     const preferred = lang === 'hi'
-      ? ['hi-IN', 'hi', 'en-IN']
+      ? ['hi-IN', 'hi']
       : ['en-IN', 'en-GB', 'en-US', 'en'];
     return preferred.reduce<SpeechSynthesisVoice | undefined>((selected, wanted) =>
       selected ?? voices.find((voice) => voice.lang.toLowerCase() === wanted.toLowerCase())
@@ -129,6 +129,12 @@ export function FloatingAssistant() {
     const run = speechRunRef.current;
     const chunks = speechChunks(text);
     const voice = pickVoice(lang);
+    if (lang === 'hi' && !voice) {
+      setError(lang === 'hi'
+        ? 'इस ब्राउज़र में हिंदी आवाज़ इंस्टॉल नहीं है। Windows में Hindi speech voice इंस्टॉल करें और Replay voice दबाएं।'
+        : 'Hindi speech is not installed in this browser. Install a Hindi speech voice in Windows, then press Replay voice.');
+      return;
+    }
     let index = 0;
 
     const playNext = () => {
@@ -268,12 +274,12 @@ export function FloatingAssistant() {
               <FlowCareMark size={25} />
             </span>
             <div className="min-w-0">
-              <h2 className="truncate text-base font-extrabold text-ink-900">FlowCare AI <span className="ml-1 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-700">{hindi ? 'in English' : 'in हिंदी'}</span></h2>
+              <h2 className="truncate text-base font-extrabold text-ink-900">FlowCare AI <span className="ml-1 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-700">{hindi ? 'हिंदी' : 'English'}</span></h2>
               <p className="text-xs text-ink-500">{hindi ? 'लाइव वॉइस असिस्टेंट' : 'Live Voice Assistant'}</p>
             </div>
             <div className="ml-auto flex items-center gap-2">
               <button type="button" onClick={toggleLanguage} className="rounded-xl border border-ink-200 px-2.5 py-1.5 text-[11px] font-semibold text-ink-700 hover:bg-ink-50">
-                {hindi ? 'Switch language' : 'भाषा बदलें'}
+                {hindi ? 'English में बोलें' : 'हिंदी में बोलें'}
               </button>
               <button type="button" onClick={closeAssistant} className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-ink-100" aria-label="Close FlowCare assistant">
                 <IconClose width={18} height={18} />
