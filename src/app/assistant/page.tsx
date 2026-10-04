@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { HospitalCard, type ResultWithEvidence } from '@/components/HospitalCard';
-import { IconInfo, IconPin, IconSparkles } from '@/components/Icons';
+import { IconInfo, IconMic, IconPin, IconSparkles, IconStop, IconVolume } from '@/components/Icons';
 import { label } from '@/lib/discovery/filters';
 import { trackEvent, useGeolocation, useSessionId } from '@/lib/client/hooks';
 import { formatDateTime } from '@/lib/time';
@@ -11,6 +11,31 @@ import { formatDateTime } from '@/lib/time';
 export const dynamic = 'force-dynamic';
 
 interface ConversationMessage { role: 'user' | 'assistant'; content: string }
+
+/** Browser speech APIs are not included in every TypeScript DOM lib. Keep the
+ * integration narrow so speech remains an optional enhancement, not a server
+ * dependency or a reason for the assistant to fail. */
+type SpeechResult = { 0: { transcript: string } };
+type SpeechResultList = { length: number; [index: number]: SpeechResult };
+type SpeechEvent = Event & { results: SpeechResultList };
+type SpeechRecognitionLike = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: SpeechEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+};
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
 
 interface AssistantResponse {
   reply: string;
@@ -73,6 +98,75 @@ export default function AssistantPage() {
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<AssistantResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [speechAvailable, setSpeechAvailable] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingText, setSpeakingText] = useState<string | null>(null);
+  const [autoRead, setAutoRead] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const speechBaseRef = useRef('');
+
+  useEffect(() => {
+    const available = Boolean(
+      (window.SpeechRecognition || window.webkitSpeechRecognition) && 'speechSynthesis' in window,
+    );
+    setSpeechAvailable(available);
+    return () => {
+      recognitionRef.current?.stop();
+      window.speechSynthesis?.cancel();
+    };
+  }, []);
+
+  const toggleListening = () => {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return;
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new Recognition();
+    speechBaseRef.current = query.trim();
+    recognition.lang = 'en-IN';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.onresult = (event) => {
+      const transcript = Array.from({ length: event.results.length }, (_, index) => event.results[index][0].transcript).join(' ');
+      setQuery(`${speechBaseRef.current} ${transcript}`.trim());
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setError('Voice input could not start. Check your microphone permission or type your request instead.');
+    };
+    recognitionRef.current = recognition;
+    setError(null);
+    setIsListening(true);
+    recognition.start();
+  };
+
+  const speak = (text: string) => {
+    if (!('speechSynthesis' in window) || !text.trim()) return;
+    if (isSpeaking && speakingText === text) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      setSpeakingText(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-IN';
+    utterance.rate = 0.95;
+    utterance.onstart = () => { setIsSpeaking(true); setSpeakingText(text); };
+    utterance.onend = () => { setIsSpeaking(false); setSpeakingText(null); };
+    utterance.onerror = () => { setIsSpeaking(false); setSpeakingText(null); };
+    window.speechSynthesis.speak(utterance);
+  };
 
   useEffect(() => {
     fetch('/api/assistant/providers')
@@ -98,6 +192,7 @@ export default function AssistantPage() {
       const j = await res.json();
       if (!res.ok) { setError(j.error?.message ?? 'The assistant could not run that search.'); return; }
       setData(j.data);
+      if (autoRead) window.setTimeout(() => speak(j.data.reply), 0);
       const nextHistory: ConversationMessage[] = [
         ...history,
         { role: 'user', content: trimmed },
@@ -151,11 +246,31 @@ export default function AssistantPage() {
                 Tell me what kind of hospital or appointment you&apos;re looking for and I&apos;ll search FlowCare&apos;s verified records.
               </p>
               <p className="mt-2 text-[11px] text-ink-500">I don&apos;t diagnose, recommend treatment, or decide how urgent a situation is.</p>
+              <button
+                type="button"
+                onClick={() => speak('Hi, I am FlowCare\'s hospital assistant. Tell me what kind of hospital or appointment you are looking for and I will search FlowCare\'s verified records.')}
+                disabled={!speechAvailable}
+                className="mt-3 inline-flex min-h-[32px] items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-800 transition hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSpeaking && speakingText?.startsWith('Hi, I am FlowCare') ? <IconStop width={13} height={13} /> : <IconVolume width={13} height={13} />}
+                {isSpeaking && speakingText?.startsWith('Hi, I am FlowCare') ? 'Stop intro' : 'Listen to intro'}
+              </button>
             </ChatBubble>
 
             {history.map((message, index) => (
               <ChatBubble key={`${message.role}-${index}`} role={message.role}>
-                {message.content}
+                <div>{message.content}</div>
+                {message.role === 'assistant' && (
+                  <button
+                    type="button"
+                    onClick={() => speak(message.content)}
+                    disabled={!speechAvailable}
+                    className="mt-2 inline-flex min-h-[30px] items-center gap-1.5 rounded-full bg-ink-50 px-2.5 py-1 text-[10px] font-bold text-ink-600 transition hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isSpeaking && speakingText === message.content ? <IconStop width={12} height={12} /> : <IconVolume width={12} height={12} />}
+                    {isSpeaking && speakingText === message.content ? 'Stop' : 'Listen'}
+                  </button>
+                )}
               </ChatBubble>
             ))}
 
@@ -194,6 +309,41 @@ export default function AssistantPage() {
 
         <div className="border-t border-ink-200 bg-white px-3 py-3 sm:px-6 sm:py-4">
           <div className="mx-auto max-w-3xl">
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 via-white to-brand-50 px-3 py-2.5">
+              <div className="mr-auto flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-violet-600 text-white shadow-sm"><IconMic width={16} height={16} /></span>
+                <div>
+                  <p className="text-xs font-extrabold text-ink-900">Talk to FlowCare</p>
+                  <p className="text-[10px] text-ink-500">Speak your request or listen to the assistant</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleListening}
+                disabled={!speechAvailable}
+                aria-pressed={isListening}
+                className={`inline-flex min-h-[34px] items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-bold transition ${isListening ? 'bg-rose-600 text-white shadow-sm' : 'bg-violet-600 text-white hover:bg-violet-700'} disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-500`}
+              >
+                <IconMic width={14} height={14} />
+                {isListening ? 'Listening…' : 'Speak'}
+              </button>
+              <button
+                type="button"
+                onClick={() => data?.reply && speak(data.reply)}
+                disabled={!speechAvailable || !data?.reply}
+                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-xl border border-violet-200 bg-white px-3 py-1.5 text-[11px] font-bold text-violet-800 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSpeaking ? <IconStop width={14} height={14} /> : <IconVolume width={14} height={14} />}
+                {isSpeaking ? 'Stop audio' : 'Read reply'}
+              </button>
+              <label className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-xl px-2 py-1.5 text-[10px] font-semibold text-ink-600">
+                <input type="checkbox" checked={autoRead} onChange={(e) => setAutoRead(e.target.checked)} className="h-3.5 w-3.5 accent-violet-600" />
+                Auto-read
+              </label>
+            </div>
+            {!speechAvailable && (
+              <p className="mb-2 text-[10px] text-ink-500">Voice controls are unavailable in this browser. You can still type your request.</p>
+            )}
             <div className="flex items-end gap-2 rounded-2xl border border-ink-300 bg-white p-1.5 shadow-sm focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-100">
               <textarea
                 id="assistant-q"

@@ -59,6 +59,15 @@ export const IconCalendar = (p: SVGProps<SVGSVGElement>) => (
 export const IconMessage = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M20 11.5a7.5 7.5 0 0 1-8 7.5 8.6 8.6 0 0 1-3.6-.8L4 20l1.1-3.5A7.3 7.3 0 0 1 4.5 12 7.5 7.5 0 0 1 12 4.5a7.5 7.5 0 0 1 8 7z" /><path d="M8 12h.01M12 12h.01M16 12h.01" /></svg>
 );
+export const IconMic = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></svg>
+);
+export const IconVolume = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M5 10v4h3l4 3V7l-4 3z" /><path d="M16 9.5a4 4 0 0 1 0 5M18.5 7a7.5 7.5 0 0 1 0 10" /></svg>
+);
+export const IconStop = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+);
 export const IconExternal = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
 );
