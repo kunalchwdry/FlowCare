@@ -4,14 +4,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
-  IconCalendar, IconCompare, IconHeart, IconList, IconMap, IconMessage, IconSearch, IconSparkles,
+  IconCalendar, IconCompare, IconHeart, IconList, IconMap, IconMessage, IconSearch,
 } from './Icons';
 import { FlowCareLogo } from '@/components/Brand';
 
 const NAV = [
   { href: '/hospitals', label: 'Discover', Icon: IconSearch },
   { href: '/hospitals/map', label: 'Map', Icon: IconMap },
-  { href: '/assistant', label: 'Assistant', Icon: IconSparkles },
   { href: '/hospitals/saved', label: 'Saved', Icon: IconHeart },
   { href: '/appointments', label: 'Visits', Icon: IconCalendar },
   { href: '/care-access', label: 'Care access', Icon: IconList },

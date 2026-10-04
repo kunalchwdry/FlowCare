@@ -10,7 +10,7 @@ import { HospitalCard, HospitalCardSkeleton, type ResultWithEvidence } from './H
 import { MapView } from './MapView';
 import { HospitalPreviewSheet } from './BottomSheet';
 import { GoogleAttribution } from './GoogleAttribution';
-import { IconClose, IconCompare, IconList, IconMap, IconSparkles } from './Icons';
+import { IconClose, IconCompare, IconList, IconMap } from './Icons';
 import { filtersToSearchParams, type DiscoveryFilters } from '@/lib/discovery/filters';
 import { CITY_ANCHORS } from '@/lib/discovery/geo';
 import { trackEvent, useCompareBasket, useGeolocation, useRecentlyViewed, useSessionId } from '@/lib/client/hooks';
@@ -297,7 +297,6 @@ export function DiscoveryExplorer({ initialView = 'list' }: { initialView?: View
                 {activeCount > 0 && (
                   <button onClick={() => { setFilters({}); setQuery(''); }} className="fc-btn-primary text-xs">Clear all filters</button>
                 )}
-                <Link href="/assistant" className="fc-btn-secondary text-xs"><IconSparkles width={14} height={14} /> Ask the assistant</Link>
               </div>
             </div>
           )}
