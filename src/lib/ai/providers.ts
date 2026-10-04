@@ -246,10 +246,9 @@ export function listProviders(): ProviderInfo[] {
 export function getProvider(id?: string | null): LlmProvider | null {
   const wanted = id ?? env.aiDefaultProvider();
   const exact = PROVIDERS.find((p) => p.id === wanted);
-  if (exact?.isConfigured()) return exact;
-  // Never silently use a provider the user did not pick when they picked one.
-  if (id) return null;
-  return PROVIDERS.find((p) => p.isConfigured()) ?? null;
+  // The application-managed provider is an explicit deployment choice. Do
+  // not silently fall back to Gemini (or another provider) after migration.
+  return exact?.isConfigured() ? exact : null;
 }
 
 /**
@@ -265,5 +264,5 @@ export function getProviderById(id: string): LlmProvider | null {
 }
 
 export function anyProviderConfigured(): boolean {
-  return PROVIDERS.some((p) => p.isConfigured());
+  return Boolean(getProvider());
 }
