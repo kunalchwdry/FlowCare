@@ -1,20 +1,21 @@
 import { listProviders } from '@/lib/ai/providers';
+import { env } from '@/lib/env';
 import { ok } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * The client only needs to know whether the application-owned Gemini provider
- * is configured. It must never choose a vendor or receive any key material.
+ * The browser only learns provider metadata and configuration status. It never
+ * receives a provider key or chooses credentials for a request.
  */
 export async function GET() {
-  const gemini = listProviders().find((p) => p.id === 'gemini');
+  const groq = listProviders().find((provider) => provider.id === 'groq');
   return ok({
-    providers: gemini ? [{ ...gemini, configured: gemini.configured }] : [],
-    defaultProvider: 'gemini',
-    anyConfigured: Boolean(gemini?.configured),
+    providers: groq ? [groq] : [],
+    defaultProvider: env.aiDefaultProvider(),
+    anyConfigured: Boolean(groq?.configured),
     serverManaged: true,
-    note: 'FlowCare uses one application-managed Gemini key. Users do not need to provide an API key.',
+    note: 'FlowCare uses an application-managed Groq key. Users do not need to provide an API key.',
   });
 }

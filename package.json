@@ -19,6 +19,7 @@
     "test:live": "FLOWCARE_LIVE_DB=1 vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
+    "@google/genai": "^2.27.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.45.4",
     "maplibre-gl": "^4.7.1",

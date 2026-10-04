@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     // fallback keeps the bubble useful if Gemini is unavailable; directory
     // replies below remain data-derived so the model cannot invent hospitals.
     if (GENERAL_SCOPE_QUERY.test(normalizedQuery) && !DIRECTORY_QUERY.test(normalizedQuery)) {
-      const conversationalProvider = getProvider('gemini');
+      const conversationalProvider = getProvider();
       const aiReply = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
       const fallbackReply = body.language === 'hi'
         ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
 
     // One application-owned provider. The browser cannot select a vendor or
     // supply a credential; changing providers later is a server-only change.
-    const provider = getProvider('gemini');
+    const provider = getProvider();
 
     const intent = await extractIntent(body.query, {
       provider,

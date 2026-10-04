@@ -13,7 +13,7 @@ export const env = {
   placesRegion: () => s(process.env.PLACES_DEFAULT_REGION) ?? 'in',
   placesLanguage: () => s(process.env.PLACES_DEFAULT_LANGUAGE) ?? 'en',
 
-  aiDefaultProvider: () => s(process.env.AI_DEFAULT_PROVIDER) ?? 'gemini',
+  aiDefaultProvider: () => s(process.env.AI_DEFAULT_PROVIDER) ?? 'groq',
   aiTimeoutMs: () => Number(s(process.env.AI_TIMEOUT_MS) ?? 8000),
   aiMaxInputChars: () => Number(s(process.env.AI_MAX_INPUT_CHARS) ?? 400),
   aiRateLimitPerMin: () => Number(s(process.env.AI_RATE_LIMIT_PER_MIN) ?? 10),

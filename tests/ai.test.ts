@@ -47,8 +47,9 @@ describe('deterministic fallback parser', () => {
     expect(JSON.stringify(p.filters)).not.toMatch(/severity|urgency|triage|diagnos/i);
   });
 
-  it('flags snake bites even when the AI provider is unavailable', () => {
+  it('flags snake bites and cardiac attacks even when the AI provider is unavailable', () => {
     expect(parseQueryDeterministic('a snake has bitten me').emergencySignal).toBe(true);
+    expect(parseQueryDeterministic('I have a cardiac attack').emergencySignal).toBe(true);
   });
 
   it('produces only allowlist-valid filters for arbitrary text', () => {
