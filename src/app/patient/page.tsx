@@ -5,7 +5,7 @@ import { requirePatientPage } from '@/lib/auth/guards';
 import { EmptyState } from '@/components/States';
 import { FlowCareMark } from '@/components/Brand';
 import {
-  IconCalendar, IconCompare, IconHeart, IconSearch, IconSparkles,
+  IconCalendar, IconCompare, IconHeart, IconSearch,
 } from '@/components/Icons';
 import type { Appointment, Hospital } from '@/lib/types';
 import { formatDateTime } from '@/lib/time';
@@ -44,7 +44,6 @@ const QUICK = [
   { href: '/hospitals', label: 'Find a hospital', Icon: IconSearch },
   { href: '/appointments/new', label: 'Book appointment', Icon: IconCalendar },
   { href: '/hospitals/compare', label: 'Compare', Icon: IconCompare },
-  { href: '/assistant', label: 'Ask the assistant', Icon: IconSparkles },
 ];
 
 export default async function PatientDashboard() {
