@@ -94,6 +94,14 @@ export async function middleware(request: NextRequest) {
     pathname === '/auth/callback' ||
     pathname === '/reset-password';
   const sharedReviewerDoor = pathname === '/admin/hospital-registrations';
+  const authShellPath =
+    pathname === '/forgot-password' ||
+    pathname === '/forgot-password/sent' ||
+    pathname === '/reset-password' ||
+    pathname === '/patient/login' ||
+    pathname === '/patient/signup' ||
+    pathname === '/staff/login' ||
+    pathname === '/staff/register';
   if (
     isHospitalHost(host) &&
     !sharedStaffDoor &&
@@ -150,7 +158,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(to);
   }
 
-  let response = NextResponse.next({ request });
+  const requestHeaders = new Headers(request.headers);
+  if (authShellPath) requestHeaders.set('x-flowcare-shell', 'auth');
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -161,7 +171,7 @@ export async function middleware(request: NextRequest) {
       getAll: () => request.cookies.getAll(),
       setAll: (list: CookieToSet[]) => {
         list.forEach(({ name, value }) => request.cookies.set(name, value));
-        response = NextResponse.next({ request });
+        response = NextResponse.next({ request: { headers: requestHeaders } });
         list.forEach(({ name, value, options }) =>
           response.cookies.set(name, value, options as never));
       },
