@@ -15,6 +15,10 @@ describe('adaptive slot and queue policy', () => {
     expect(openCapacity({ capacity: 4, booked: 0, bookingOpen: true, startsAt: '2026-10-03T08:00:00Z', endsAt: '2026-10-03T09:00:00Z' }, now)).toBe(0);
   });
 
+  it('returns zero capacity for an already-full slot and does not invent capacity', () => {
+    expect(openCapacity({ capacity: 4, booked: 4, bookingOpen: true, startsAt: '2026-10-03T11:00:00Z', endsAt: '2026-10-03T12:00:00Z' }, new Date('2026-10-03T10:00:00Z'))).toBe(0);
+  });
+
   it('applies explicit queue rules and never reads a clinical urgency field', () => {
     const rows = [
       { id: '2', createdAt: '2026-10-03T10:02:00Z', estimatedSlotAt: '2026-10-03T10:30:00Z', position: 2 },
