@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { isDemoMode, demoReason, liveReadMode, googleMapsConfigured } from '@/lib/env';
+import { env, isDemoMode, demoReason, liveReadMode, googleMapsConfigured } from '@/lib/env';
 import { anyProviderConfigured } from '@/lib/ai/providers';
 import { DEMO_COOKIE } from '@/lib/auth/session';
 
@@ -38,6 +38,7 @@ export async function GET() {
       liveReads: liveReadMode(),
       live,
       demoAccount,
+      careAccess: { systemTransitionsConfigured: Boolean(env.supabaseServiceKey()) },
       googleMaps: {
         serverConfigured: googleMapsConfigured(),
         browserMapKeyPresent: Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY),

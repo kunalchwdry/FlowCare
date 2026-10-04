@@ -7,19 +7,20 @@
  * every read is still subject to Row Level Security. Nothing here uses a
  * service-role key and nothing here writes.
  *
- * Everything the live project does not yet contain — appointment sessions,
- * appointments, reviews, favourites, queue snapshots and the whole journey
- * layer — is delegated to `demoRepo` unchanged. That split is deliberate and
- * is reported to the user verbatim in the banner: a hospital on screen is a
- * real record from the database, an appointment slot is not.
+ * Facility discovery and published slots are read from the linked project's
+ * actual vocabulary. Appointments use the database booking/state RPCs. The
+ * additive Care Access exchange is delegated to the Supabase adapter so its
+ * requests, options, transitions and tasks are durable and RLS-scoped.
+ * Reviews and a few legacy journey tables remain intentionally unavailable
+ * until their live schema is mapped; this module returns an empty result
+ * rather than inventing records.
  *
- * Why not `supabaseRepo.ts`: that file was written against a reconstructed
- * column vocabulary (`address_line`, `hospital_departments`, `clinic_sessions`)
- * which does not match this project's actual schema, and it contains write
- * paths that would fail. This module maps the columns that genuinely exist.
+ * Why not use `supabaseRepo.ts` directly for discovery: that adapter was
+ * originally written against a reconstructed column vocabulary
+ * (`address_line`, `hospital_departments`, `clinic_sessions`) which does not
+ * match this project's actual schema (`address`, `departments`, `slots`).
+ * This module maps the columns that genuinely exist.
  */
-import fs from 'node:fs';
-import path from 'node:path';
 import { demoRepo } from './demoRepo';
 import type { NewAppointmentMessage, Repo } from './repo';
 import type {
@@ -28,7 +29,7 @@ import type {
 } from '@/lib/types';
 
 const URL_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
 import { clockTime, zonedDateKey } from '@/lib/time';
 import {
   fromDbStatus, idempotencyKey, isPersistable, toDbAction,
@@ -180,46 +181,6 @@ async function loadHospitals(): Promise<Hospital[]> {
 }
 
 /**
- * Locally generated clinic sessions for the project's own `[TEST]` fixture
- * hospitals, which are flagged `booking_integrated` and carry departments
- * with a capacity but have no sessions table to draw slots from.
- *
- * These slots are NOT live data and the UI must say so. They exist so the
- * booking path is demonstrable end to end; they are attached only to rows the
- * database itself labels `[TEST]`, never to one of the 60 real facilities —
- * offering a fake slot at a real hospital would be the worst thing this
- * product could do.
- */
-
-let sessionCache: { at: number; rows: ClinicSession[] } | null = null;
-async function sessions(): Promise<ClinicSession[]> {
-  if (sessionCache && Date.now() - sessionCache.at < TTL_MS) return sessionCache.rows;
-  const rows = await realSessions();
-  sessionCache = { at: Date.now(), rows };
-  return rows;
-}
-
-/**
- * Slot requests, persisted to disk rather than held in a module-level array.
- *
- * Next.js bundles route handlers and server components separately, so each
- * entry point can receive its OWN instance of this module. An in-memory array
- * is therefore written by `POST /api/appointments` and read back as empty by
- * the `/appointments/[id]` page, which 404s a request that was just created.
- * That is exactly why `demoRepo` is file-backed, and this must be too.
- * The file is re-read whenever its mtime changes, so no instance serves a
- * stale view of what another instance wrote.
- */
-interface StoredRequest { sessionId: string; patientId: string; reason: string | null; at: string }
-
-const REQ_DIR = path.join(process.cwd(), '.data');
-const REQ_FILE = path.join(REQ_DIR, 'live-requests.json');
-let reqCache: { mtimeMs: number; rows: StoredRequest[] } | null = null;
-
-
-
-
-/**
  * Real bookable slots, read from the `slots` table.
  *
  * This repository used to invent sessions for every department — fourteen
@@ -232,63 +193,28 @@ let reqCache: { mtimeMs: number; rows: StoredRequest[] } | null = null;
  * promises: never infer availability that has not been published.
  */
 async function realSessions(hospitalIds?: string[]): Promise<ClinicSession[]> {
-  const nowIso = new Date().toISOString();
-  const depts = await rest(
-    `departments?select=id,hospital_id,name,booking_open${
-      hospitalIds?.length ? `&hospital_id=in.(${hospitalIds.join(',')})` : ''
-    }`,
-  );
-  if (depts.length === 0) return [];
-  const byDept = new Map(depts.map((d) => [String(d.id), d]));
-
-  const slots = await rest(
-    `slots?select=id,department_id,starts_at,ends_at,kind,capacity,booking_open` +
-      `&department_id=in.(${[...byDept.keys()].join(',')})` +
-      `&starts_at=gt.${nowIso}&order=starts_at.asc&limit=400`,
-  );
-
-  // How many seats each slot has already given out.
-  let taken = new Map<string, number>();
-  if (slots.length) {
-    try {
-      const appts = await rest(
-        `appointments?select=slot_id,status&slot_id=in.(${slots.map((s) => s.id).join(',')})`,
-      );
-      for (const a of appts) {
-        if (['cancelled', 'denied', 'no_show'].includes(String(a.status))) continue;
-        const k = String(a.slot_id);
-        taken.set(k, (taken.get(k) ?? 0) + 1);
-      }
-    } catch {
-      // anon cannot read appointments; seats fall back to 0 taken rather
-      // than hiding slots that may well be free.
-    }
+  // This SECURITY DEFINER read returns only published facilities and computes
+  // occupancy in the database. We do not fall back to `booked = 0`, which
+  // would turn an unreadable occupancy signal into invented availability.
+  const rows: Row[] = [];
+  for (const hospitalId of hospitalIds?.length ? hospitalIds : [null]) {
+    const query = hospitalId
+      ? `rpc/list_public_slot_availability?p_hospital=${encodeURIComponent(hospitalId)}&p_limit=400`
+      : 'rpc/list_public_slot_availability?p_limit=400';
+    rows.push(...await rest(query));
   }
-
-  return slots.map((s) => {
-    const d = byDept.get(String(s.department_id))!;
-    const start = new Date(s.starts_at);
-    const end = new Date(s.ends_at);
-    const booked = taken.get(String(s.id)) ?? 0;
-    const capacity = Number(s.capacity ?? 0);
-    const open = Boolean(s.booking_open) && Boolean(d.booking_open) && booked < capacity;
+  return rows.map((s) => {
+    const start = new Date(s.starts_at); const end = new Date(s.ends_at);
+    const capacity = Number(s.capacity ?? 0); const booked = Number(s.booked ?? 0);
+    const open = Boolean(s.booking_open) && booked < capacity && (!s.expires_at || new Date(s.expires_at).getTime() > Date.now());
     return {
-      id: String(s.id),
-      hospitalId: String(d.hospital_id),
-      departmentId: String(d.id),
-      /*
-       * Derived in the clinic's timezone, not UTC.
-       *
-       * These were `toISOString()` slices, which is UTC by definition: a
-       * 09:30 Pune clinic became 04:00, and a 00:30 one was filed under
-       * the previous day. Both are times a patient could act on.
-       */
-      date: zonedDateKey(s.starts_at),
-      startTime: clockTime(start),
-      endTime: clockTime(end),
-      capacity,
-      booked,
-      status: open ? 'open' : 'full',
+      id: String(s.id), hospitalId: String(s.hospital_id), departmentId: String(s.department_id),
+      date: zonedDateKey(s.starts_at), startTime: clockTime(start), endTime: clockTime(end), capacity, booked,
+      status: open ? 'open' : 'full', providerId: s.provider_id ?? null, serviceSlug: s.service_slug ?? null,
+      slotType: s.slot_type ?? 'approval_required', waitlistEnabled: Boolean(s.waitlist_enabled),
+      approvalResponseWindowMinutes: Number(s.approval_response_window_minutes ?? 240),
+      recoveryPolicy: s.recovery_policy ?? 'offer_alternatives', expiresAt: s.expires_at ?? null,
+      updatedAt: s.updated_at ?? s.starts_at, source: 'database',
     } satisfies ClinicSession;
   });
 }
@@ -327,6 +253,7 @@ function mapDbAppointment(r: Row, departmentName?: string): Appointment {
     completedAt: r.status === 'completed' ? String(r.created_at) : null,
     reason: null,
     requestedAt: String(r.created_at),
+    queueId: r.queue_id ?? null, slotType: r.slot_type ?? null, approvalDeadline: r.approval_deadline ?? null, approvalStatus: r.approval_status ?? 'not_required',
     version: Number(r.version ?? 1),
   };
 }
@@ -378,6 +305,18 @@ async function hydrateAppointmentTimes(sb: any, appointments: Appointment[]): Pr
   if (error || !data) return appointments;
   const byId = new Map<string, string>(data.map((r: Row) => [String(r.id), String(r.starts_at)] as [string, string]));
   return appointments.map((a) => ({ ...a, scheduledFor: byId.get(a.sessionId) ?? a.scheduledFor }));
+}
+
+/**
+ * Care Access writes/readbacks use the additive Supabase exchange schema even
+ * in live-facility mode. The dynamic import avoids a module cycle: the full
+ * adapter reuses this module for the linked project's facility vocabulary.
+ */
+async function careRepo(): Promise<Repo> {
+  const sb = await getSupabaseServerClient();
+  if (!sb) throw new Error('SUPABASE_UNAVAILABLE');
+  const { createSupabaseRepo } = await import('./supabaseRepo');
+  return createSupabaseRepo(sb, getSupabaseAdminClient());
 }
 
 export const liveRepo: Repo = {
@@ -579,6 +518,26 @@ export const liveRepo: Repo = {
     }
     return mapDbMessage(data as Row);
   },
+
+  // ------------------------------------------- live Care Access exchange
+  async listCareRequests(args) { return (await careRepo()).listCareRequests(args); },
+  async getCareRequest(id) { return (await careRepo()).getCareRequest(id); },
+  async createCareRequest(input) { return (await careRepo()).createCareRequest(input); },
+  async listCareOptions(id) { return (await careRepo()).listCareOptions(id); },
+  async saveCareOptions(id, options) { return (await careRepo()).saveCareOptions(id, options); },
+  async transitionCareRequest(input) { return (await careRepo()).transitionCareRequest(input); },
+  async listCareTransitions(id) { return (await careRepo()).listCareTransitions(id); },
+  async listCareEpisodes(args) { return (await careRepo()).listCareEpisodes(args); },
+  async listCareTasks(args) { return (await careRepo()).listCareTasks(args); },
+  async createCareTask(input) { return (await careRepo()).createCareTask(input); },
+  async updateCareTask(id, actorId, status, resolution) { return (await careRepo()).updateCareTask(id, actorId, status, resolution); },
+  async listCapacitySignals(hospitalIds) { return (await careRepo()).listCapacitySignals(hospitalIds); },
+  async publishCapacitySignal(input) { return (await careRepo()).publishCapacitySignal(input); },
+  async getCareAccessMetrics(hospitalId) { return (await careRepo()).getCareAccessMetrics(hospitalId); },
+  async getFacilityFacts(hospitalId) { return (await careRepo()).getFacilityFacts(hospitalId); },
+  async listServiceVerifications(hospitalIds) { return (await careRepo()).listServiceVerifications(hospitalIds); },
+  async listSchemeListings(hospitalIds) { return (await careRepo()).listSchemeListings(hospitalIds); },
+  async listAccessibilityComponents(hospitalIds) { return (await careRepo()).listAccessibilityComponents(hospitalIds); },
 
   async listHospitals() {
     return loadHospitals();

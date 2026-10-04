@@ -274,6 +274,11 @@ export interface Appointment {
   patientName?: string | null;
   /** Human department name where known; falls back to the id. */
   departmentName?: string | null;
+  /** Adaptive booking metadata populated by the live queue schema when available. */
+  queueId?: string | null;
+  slotType?: SlotType | null;
+  approvalDeadline?: string | null;
+  approvalStatus?: 'not_required' | 'pending' | 'approved' | 'expired' | 'rejected';
   /** When the hospital accepted. Null while the request is still pending. */
   confirmedAt?: string | null;
   /**
@@ -336,16 +341,29 @@ export interface Notification {
   createdAt: string;
 }
 
+export type SlotType = 'instant' | 'approval_required' | 'waitlist';
+export type RecoveryPolicy = 'offer_alternatives' | 'continue_waiting' | 'manual_review' | 'stay_with_hospital';
+
 export interface ClinicSession {
   id: string;
   hospitalId: string;
   departmentId: string;
+  providerId?: string | null;
+  serviceSlug?: string | null;
   date: string;
   startTime: string;
   endTime: string;
   capacity: number;
   booked: number;
   status: 'open' | 'full' | 'cancelled' | 'closed';
+  slotType?: SlotType;
+  waitlistEnabled?: boolean;
+  approvalDeadline?: string | null;
+  expiresAt?: string | null;
+  approvalResponseWindowMinutes?: number | null;
+  recoveryPolicy?: RecoveryPolicy;
+  updatedAt?: string;
+  source?: 'database' | 'demo_simulated';
 }
 
 export interface ReviewReport {

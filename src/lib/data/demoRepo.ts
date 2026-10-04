@@ -10,6 +10,14 @@ import path from 'node:path';
 import { SEED } from './seed';
 import { FACTS } from './facts';
 import type {
+  CareAccessMetrics, CareAccessOption, CareAccessRequest, CareAccessTransitionInput,
+  CareEpisode, CareStateTransition, CareTask, CapacitySignal, NewCareAccessRequest, NewCareTask,
+  QueueEntry, SlotType, RecoveryPolicy,
+} from '@/lib/careAccess/types';
+import type { NewOperationalDepartment, NewOperationalService, NewOperationalSlot, NewProvider, NewProviderSchedule, OperationalDepartment, OperationalService, OperationalSlot, Provider, ProviderSchedule, QueueListFilters } from '@/lib/operations/types';
+import { planCareAccessTransition, CareAccessTransitionError } from '@/lib/careAccess/stateMachine';
+import { formatQueueId } from '@/lib/operations/policy';
+import type {
   AuditEvent, CorrectionReview, FacilityFacts, NewAppointmentMessage, NewCareContext,
   NewCorrection, NewAppointmentRequest, NewFollowUpTask, NewReport, NewReview,
   NewVisitRecord, Repo, TransitionInput,
@@ -40,6 +48,18 @@ interface MutableState {
   appointmentEvents: AppointmentEvent[];
   appointmentMessages: AppointmentMessage[];
   notifications: Notification[];
+  /* Closed-loop care access exchange. */
+  careRequests: CareAccessRequest[];
+  careOptions: CareAccessOption[];
+  careTransitions: CareStateTransition[];
+  careEpisodes: CareEpisode[];
+  careTasks: CareTask[];
+  capacitySignals: CapacitySignal[];
+  operationalSlots: OperationalSlot[];
+  operationalServices: OperationalService[];
+  providers: Provider[];
+  providerSchedules: ProviderSchedule[];
+  queueEntries: QueueEntry[];
 }
 
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -49,7 +69,9 @@ function emptyState(): MutableState {
   return {
     appointments: [], favorites: [], reviews: [...SEED.reviews], reports: [], moderationEvents: [], audit: [],
     careContexts: [], visitRecords: [], followUpTasks: [], corrections: [],
-      appointmentEvents: [], appointmentMessages: [], notifications: [],
+    appointmentEvents: [], appointmentMessages: [], notifications: [],
+    careRequests: [], careOptions: [], careTransitions: [], careEpisodes: [], careTasks: [], capacitySignals: [],
+    operationalSlots: [], operationalServices: [], providers: [], providerSchedules: [], queueEntries: [],
   };
 }
 
@@ -203,6 +225,7 @@ export const demoRepo: Repo = {
       (a) => a.sessionId === session.id && a.status !== 'cancelled',
     ).length;
     if (session.status !== 'open') throw new Error('BOOKING_CLOSED');
+    if (session.slotType === 'waitlist') throw new Error('WAITLIST_REQUIRED');
     if (session.booked + takenHere >= session.capacity) throw new Error('CAPACITY_FULL');
     const already = s.appointments.find(
       (a) => a.sessionId === session.id && a.patientId === input.patientId && a.status !== 'cancelled',
@@ -216,7 +239,11 @@ export const demoRepo: Repo = {
       departmentId: session.departmentId,
       sessionId: session.id,
       scheduledFor: `${session.date}T${session.startTime}:00`,
-      status: 'requested',
+      status: session.slotType === 'instant' ? 'booked' : 'requested',
+      slotType: session.slotType ?? 'approval_required',
+      queueId: formatQueueId(new Date().getFullYear(), session.departmentId, Math.floor(100000 + Math.random() * 900000)),
+      approvalStatus: session.slotType === 'instant' ? 'not_required' : 'pending',
+      approvalDeadline: session.slotType === 'approval_required' ? new Date(Date.now() + (session.approvalResponseWindowMinutes ?? 240) * 60_000).toISOString() : null,
       completedAt: null,
       reason: input.reason ?? null,
       requestedAt: new Date().toISOString(),
@@ -226,6 +253,10 @@ export const demoRepo: Repo = {
       version: 1,
     };
     s.appointments.push(appointment);
+    s.queueEntries.push({ id: uid('queue'), queueId: appointment.queueId!, careRequestId: null, appointmentId: appointment.id,
+      patientId: appointment.patientId, hospitalId: appointment.hospitalId, departmentId: appointment.departmentId, providerId: session.providerId ?? null,
+      slotId: session.id, queueType: 'appointment', status: session.slotType === 'instant' ? 'booked' : 'approval_pending', position: null,
+      estimatedSlotAt: appointment.scheduledFor, lastUpdatedAt: appointment.requestedAt!, createdAt: appointment.requestedAt! });
     save();
     /*
      * A copy, not the stored object.
@@ -380,6 +411,375 @@ export const demoRepo: Repo = {
     s.appointmentMessages.push(message);
     save();
     return { ...message };
+  },
+
+  /* ================================================= care access exchange */
+
+  async listCareRequests({ patientId, hospitalId }) {
+    let rows = load().careRequests;
+    if (patientId) rows = rows.filter((r) => r.patientId === patientId);
+    if (hospitalId) rows = rows.filter((r) => r.selectedHospitalId === hospitalId);
+    return rows.slice().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((r) => ({ ...r }));
+  },
+
+  async getCareRequest(id) {
+    const row = load().careRequests.find((r) => r.id === id);
+    return row ? { ...row } : null;
+  },
+
+  async createCareRequest(input: NewCareAccessRequest) {
+    const s = load();
+    const now = new Date().toISOString();
+    const request: CareAccessRequest = {
+      id: uid('care'), patientId: input.patientId,
+      specialty: input.specialty ?? null, serviceType: input.serviceType,
+      location: input.location ?? null, preferredStartDate: input.preferredStartDate ?? null,
+      preferredEndDate: input.preferredEndDate ?? null, preferredTimeRange: input.preferredTimeRange ?? null,
+      budgetConstraint: input.budgetConstraint ?? null,
+      accessibilityRequirements: input.accessibilityRequirements ?? [],
+      languagePreference: input.languagePreference ?? [], coverage: input.coverage ?? null,
+      referralRequired: input.referralRequired ?? null, state: 'REQUESTED', patientPhone: null,
+      slotType: null, queueId: null, queuePosition: null, approvalDeadline: null,
+      approvalResponseWindowMinutes: null, recoveryPolicy: null,
+      selectedHospitalId: null, selectedOptionId: null, appointmentId: null, episodeId: null,
+      version: 1, createdAt: now, updatedAt: now, closedAt: null,
+    };
+    s.careRequests.push(request);
+    s.careTransitions.push({
+      id: uid('careevt'), careRequestId: request.id, previousState: null,
+      newState: 'REQUESTED', action: 'create', actorId: null, actorRole: 'system',
+      reason: null, metadata: { created: true }, createdAt: now,
+    });
+    save();
+    return { ...request };
+  },
+
+  async listCareOptions(careRequestId) {
+    return load().careOptions
+      .filter((o) => o.careRequestId === careRequestId)
+      .sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.hospitalName.localeCompare(b.hospitalName))
+      .map((o) => ({ ...o, reasons: [...o.reasons], accessibility: [...o.accessibility], languages: [...o.languages] }));
+  },
+
+  async saveCareOptions(careRequestId, options) {
+    const s = load();
+    s.careOptions = s.careOptions.filter((o) => o.careRequestId !== careRequestId);
+    s.careOptions.push(...options.map((o) => ({ ...o })));
+    save();
+    return options.map((o) => ({ ...o }));
+  },
+
+  async transitionCareRequest(input) {
+    const s = load();
+    const row = s.careRequests.find((r) => r.id === input.careRequestId);
+    if (!row) throw new Error('NOT_FOUND');
+    if (input.actor === 'patient' && row.patientId !== input.actorId) throw new Error('NOT_FOUND');
+    if (input.actor === 'hospital' && row.selectedHospitalId && row.selectedHospitalId !== (input.metadata?.hospitalId as string | undefined)) {
+      throw new Error('NOT_FOUND');
+    }
+    const decided = planCareAccessTransition(row.state, input, row.version);
+    const now = new Date().toISOString();
+    const optionActions = ['select_option', 'select_recovery', 'request_approval', 'join_waitlist', 'rebook'];
+    let selectedOption = row.selectedOptionId ? s.careOptions.find((o) => o.id === row.selectedOptionId && o.careRequestId === row.id) : null;
+    if (optionActions.includes(decided.action)) {
+      const option = s.careOptions.find((o) => o.id === decided.optionId && o.careRequestId === row.id);
+      if (!option || !option.eligible) throw new Error('OPTION_NOT_FOUND');
+      s.careOptions = s.careOptions.map((o) => ({
+        ...o,
+        status: o.id === option.id ? 'selected' : o.careRequestId === row.id && o.status === 'offered' ? 'declined' : o.status,
+        selectedAt: o.id === option.id ? now : o.selectedAt,
+      }));
+      selectedOption = option;
+      row.selectedHospitalId = option.hospitalId;
+      row.selectedOptionId = option.id;
+      row.slotType = option.slotType ?? 'approval_required';
+      row.approvalResponseWindowMinutes = option.slotType === 'approval_required' ? 240 : null;
+      row.approvalDeadline = decided.action === 'request_approval' && option.slotType === 'approval_required'
+        ? new Date(Date.now() + (row.approvalResponseWindowMinutes ?? 240) * 60_000).toISOString() : null;
+      row.recoveryPolicy = 'offer_alternatives';
+    }
+    if (decided.action === 'book' && row.selectedOptionId && !selectedOption) {
+      selectedOption = s.careOptions.find((o) => o.id === row.selectedOptionId && o.careRequestId === row.id) ?? null;
+      if (selectedOption) row.slotType = selectedOption.slotType ?? 'approval_required';
+    }
+    if (decided.action === 'book' && input.appointmentId) row.appointmentId = input.appointmentId;
+    if (['request_approval', 'join_waitlist', 'rebook'].includes(decided.action) && selectedOption && !row.queueId) {
+      const session = SEED.sessions.find((x) => x.id === selectedOption?.sessionId);
+      const prefix = (session?.departmentId ?? 'CARE').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'CARE';
+      row.queueId = formatQueueId(new Date().getFullYear(), prefix, Math.floor(100000 + Math.random() * 900000));
+      row.queuePosition = s.queueEntries.filter((e) => e.slotId === selectedOption?.sessionId && ['waiting', 'approval_pending'].includes(e.status)).length + 1;
+      const sessionDate = session ? `${session.date}T${session.startTime}:00` : null;
+      s.queueEntries.push({ id: uid('queue'), queueId: row.queueId, careRequestId: row.id, appointmentId: row.appointmentId,
+        patientId: row.patientId, hospitalId: selectedOption.hospitalId, departmentId: selectedOption.departmentId ?? '', providerId: selectedOption.providerId ?? null,
+        slotId: selectedOption.sessionId, queueType: row.slotType === 'waitlist' ? 'waitlist' : decided.action === 'rebook' ? 'recovery' : 'approval',
+        status: decided.action === 'join_waitlist' ? 'waiting' : decided.action === 'rebook' ? 'rebooked' : 'approval_pending',
+        position: row.queuePosition, estimatedSlotAt: sessionDate, lastUpdatedAt: now, createdAt: now });
+    }
+    row.state = decided.to;
+    if (row.queueId) {
+      const queue = s.queueEntries.find((e) => e.queueId === row.queueId);
+      if (queue) {
+        queue.status = decided.to === 'BOOKED' || decided.to === 'REBOOKED' ? 'booked' : decided.to === 'APPROVAL_EXPIRED' ? 'expired' : queue.status;
+        queue.appointmentId = row.appointmentId;
+        queue.lastUpdatedAt = now;
+      }
+    }
+    row.version += 1;
+    row.updatedAt = now;
+    if (decided.to === 'CLOSED') row.closedAt = now;
+    const transition: CareStateTransition = {
+      id: uid('careevt'), careRequestId: row.id, previousState: decided.from,
+      newState: decided.to, action: decided.action, actorId: input.actorId,
+      actorRole: input.actorRole, reason: decided.reason, metadata: decided.metadata,
+      createdAt: now,
+    };
+    s.careTransitions.push(transition);
+    if (!row.episodeId && row.selectedHospitalId && ['PATIENT_SELECTED', 'REFERRAL_SUBMITTED', 'APPROVAL_PENDING', 'APPROVED', 'ACKNOWLEDGED', 'ACCEPTED', 'SLOT_OFFERED', 'WAITLISTED', 'BOOKED', 'RECOVERY_REQUIRED', 'RECOVERY_OPTIONS_AVAILABLE', 'REBOOKED'].includes(row.state)) {
+      const episode: CareEpisode = {
+        id: uid('episode'), careRequestId: row.id, patientId: row.patientId,
+        hospitalId: row.selectedHospitalId, appointmentId: row.appointmentId,
+        followUpRequired: false, followUpCompleted: false, createdAt: now, closedAt: null,
+      };
+      s.careEpisodes.push(episode);
+      row.episodeId = episode.id;
+    } else if (row.episodeId) {
+      const episode = s.careEpisodes.find((e) => e.id === row.episodeId);
+      if (episode) {
+        if (row.appointmentId) episode.appointmentId = row.appointmentId;
+        if (row.state === 'FOLLOW_UP_OPEN') episode.followUpRequired = true;
+        if (row.state === 'CLOSED') episode.closedAt = now;
+      }
+    }
+    save();
+    return { ...row };
+  },
+
+  async listCareTransitions(careRequestId) {
+    return load().careTransitions.filter((e) => e.careRequestId === careRequestId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
+  async listCareEpisodes({ patientId, hospitalId }) {
+    let rows = load().careEpisodes;
+    if (patientId) rows = rows.filter((e) => e.patientId === patientId);
+    if (hospitalId) rows = rows.filter((e) => e.hospitalId === hospitalId);
+    return rows.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((e) => ({ ...e }));
+  },
+
+  async listCareTasks({ patientId, hospitalId, careRequestId }) {
+    let rows = load().careTasks;
+    if (patientId) rows = rows.filter((t) => t.patientId === patientId);
+    if (hospitalId) rows = rows.filter((t) => t.hospitalId === hospitalId);
+    if (careRequestId) rows = rows.filter((t) => t.careRequestId === careRequestId);
+    return rows.slice().sort((a, b) => a.status.localeCompare(b.status) || b.updatedAt.localeCompare(a.updatedAt)).map((t) => ({ ...t }));
+  },
+
+  async createCareTask(input: NewCareTask) {
+    const s = load();
+    const now = new Date().toISOString();
+    const task: CareTask = {
+      id: uid('task'), careRequestId: input.careRequestId, episodeId: input.episodeId ?? null,
+      patientId: input.patientId, hospitalId: input.hospitalId ?? null,
+      ownerType: input.ownerType, ownerId: input.ownerId ?? null, taskType: input.taskType,
+      title: input.title.trim(), description: input.description?.trim() || null, status: 'open',
+      deadline: input.deadline ?? null, resolution: null, createdAt: now, updatedAt: now, completedAt: null,
+    };
+    s.careTasks.push(task);
+    save();
+    return { ...task };
+  },
+
+  async updateCareTask(id, actorId, status, resolution = null) {
+    const s = load();
+    const task = s.careTasks.find((t) => t.id === id && (t.ownerId === actorId || t.patientId === actorId || t.hospitalId === actorId));
+    if (!task) throw new Error('NOT_FOUND');
+    task.status = status; task.resolution = resolution?.trim() || task.resolution;
+    task.updatedAt = new Date().toISOString();
+    task.completedAt = status === 'completed' ? (task.completedAt ?? task.updatedAt) : null;
+    if (status === 'completed') {
+      const row = s.careRequests.find((r) => r.id === task.careRequestId);
+      if (row?.state === 'FOLLOW_UP_OPEN' && s.careTasks.filter((t) => t.careRequestId === row.id && t.status !== 'completed').length <= 1) {
+        row.state = 'CLOSED'; row.closedAt = task.updatedAt; row.updatedAt = task.updatedAt; row.version += 1;
+        s.careTransitions.push({ id: uid('careevt'), careRequestId: row.id, previousState: 'FOLLOW_UP_OPEN', newState: 'CLOSED', action: 'close', actorId, actorRole: task.ownerType, reason: null, metadata: { taskId: task.id }, createdAt: task.updatedAt });
+      }
+    }
+    save();
+    return { ...task };
+  },
+
+  async listCapacitySignals(hospitalIds) {
+    const s = load();
+    const ids = hospitalIds ? new Set(hospitalIds) : null;
+    const seeded: CapacitySignal[] = SEED.queues.map((q) => ({
+      id: `demo-capacity-${q.hospitalId}`, hospitalId: q.hospitalId, serviceSlug: null,
+      available: q.published ? true : null, queueWaitMinutes: q.medianWaitMinutes,
+      waitingCount: q.waitingCount, note: q.published ? 'Synthetic demo queue signal' : null,
+      source: 'demo_simulated', updatedAt: q.observedAt ?? new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
+    }));
+    const all = [...seeded, ...s.capacitySignals];
+    const deduped = new Map<string, CapacitySignal>();
+    for (const signal of all) {
+      if (!ids || ids.has(signal.hospitalId)) deduped.set(`${signal.hospitalId}:${signal.serviceSlug ?? ''}`, signal);
+    }
+    return [...deduped.values()].map((x) => ({ ...x }));
+  },
+
+  async publishCapacitySignal(input) {
+    const s = load();
+    const signal: CapacitySignal = { ...input, id: uid('capacity'), updatedAt: new Date().toISOString() };
+    s.capacitySignals = s.capacitySignals.filter((x) => !(x.hospitalId === signal.hospitalId && x.serviceSlug === signal.serviceSlug));
+    s.capacitySignals.push(signal);
+    save();
+    return { ...signal };
+  },
+
+  async getCareAccessMetrics(hospitalId) {
+    let requests = load().careRequests;
+    if (hospitalId) requests = requests.filter((r) => r.selectedHospitalId === hospitalId);
+    const ids = new Set(requests.map((r) => r.id));
+    const events = load().careTransitions.filter((e) => ids.has(e.careRequestId));
+    const duration = (from: string, to: string) => {
+      const out: number[] = [];
+      for (const id of ids) {
+        const es = events.filter((e) => e.careRequestId === id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        const a = es.find((e) => e.newState === from); const b = es.find((e) => e.newState === to);
+        if (a && b) out.push((new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) / 60_000);
+      }
+      return out.length ? Math.round(out.reduce((a, b) => a + b, 0) / out.length) : null;
+    };
+    const staleCapacitySignals = (await this.listCapacitySignals(hospitalId ? [hospitalId] : undefined)).filter((s) => s.expiresAt && new Date(s.expiresAt) <= new Date()).length;
+    return {
+      total: requests.length, closed: requests.filter((r) => r.state === 'CLOSED').length,
+      closureRate: requests.length ? Math.round((requests.filter((r) => r.state === 'CLOSED').length / requests.length) * 100) : null,
+      averageAcknowledgementMinutes: duration('REFERRAL_SUBMITTED', 'ACKNOWLEDGED'),
+      averageBookingMinutes: duration('SLOT_OFFERED', 'BOOKED'),
+      unresolved: requests.filter((r) => !['CLOSED', 'CANCELLED', 'NO_SHOW'].includes(r.state)).length,
+      staleCapacitySignals, cancellations: requests.filter((r) => r.state === 'CANCELLED').length,
+      noShows: requests.filter((r) => r.state === 'NO_SHOW').length,
+      followUpsOpen: requests.filter((r) => r.state === 'FOLLOW_UP_OPEN').length,
+      pendingApprovals: requests.filter((r) => r.state === 'APPROVAL_PENDING').length,
+      approvalExpired: requests.filter((r) => r.state === 'APPROVAL_EXPIRED').length,
+      waitlisted: requests.filter((r) => r.state === 'WAITLISTED').length,
+      recoveryRequired: requests.filter((r) => ['RECOVERY_REQUIRED', 'RECOVERY_OPTIONS_AVAILABLE'].includes(r.state)).length,
+    } satisfies CareAccessMetrics;
+  },
+
+  async listOperationalDepartments(hospitalId) {
+    const hospitals = hospitalId ? SEED.hospitals.filter((h) => h.id === hospitalId) : SEED.hospitals;
+    const created = load().careContexts.length; // keeps this method pure; operational rows below are durable in state
+    void created;
+    const rows: OperationalDepartment[] = hospitals.flatMap((h) => h.departments.map((d) => ({
+      id: d.id, hospitalId: h.id, name: d.name, bookingOpen: true, consultationCapacity: 4,
+      noShowGraceMinutes: 30, approvalResponseWindowMinutes: 240, waitlistEnabled: true,
+      recoveryPolicy: 'offer_alternatives' as const, queueOrderRule: 'arrival_order' as const,
+    })));
+    return rows;
+  },
+
+  async createOperationalDepartment(input: NewOperationalDepartment) {
+    const hospital = SEED.hospitals.find((h) => h.id === input.hospitalId);
+    if (!hospital) throw new Error('NOT_FOUND');
+    const row: OperationalDepartment = {
+      id: uid('dept'), hospitalId: input.hospitalId, name: input.name.trim(), bookingOpen: input.bookingOpen ?? true,
+      consultationCapacity: input.consultationCapacity ?? 4, noShowGraceMinutes: input.noShowGraceMinutes ?? 30,
+      approvalResponseWindowMinutes: input.approvalResponseWindowMinutes ?? 240, waitlistEnabled: input.waitlistEnabled ?? true,
+      recoveryPolicy: input.recoveryPolicy ?? 'offer_alternatives', queueOrderRule: input.queueOrderRule ?? 'arrival_order',
+    };
+    // Demo departments are represented as an operational overlay; the seed directory remains untouched.
+    save();
+    return row;
+  },
+
+  async listOperationalServices(hospitalId) {
+    return load().operationalServices.filter((s) => !hospitalId || s.hospitalId === hospitalId).map((s) => ({ ...s }));
+  },
+
+  async createOperationalService(input: NewOperationalService) {
+    const dept = (await demoRepo.listOperationalDepartments()).find((d) => d.id === input.departmentId);
+    if (!dept) throw new Error('NOT_FOUND');
+    const row: OperationalService = { id: uid('service'), hospitalId: dept.hospitalId, departmentId: dept.id, serviceSlug: input.serviceSlug.trim(), label: input.label.trim(), active: input.active ?? true, source: 'hospital_configured' };
+    load().operationalServices.push(row); save(); return { ...row };
+  },
+
+  async listProviders(hospitalId) {
+    return load().providers.filter((p) => !hospitalId || p.hospitalId === hospitalId).map((p) => ({ ...p }));
+  },
+
+  async createProvider(input: NewProvider) {
+    const dept = (await demoRepo.listOperationalDepartments(input.hospitalId)).find((d) => d.id === input.departmentId);
+    if (!dept) throw new Error('NOT_FOUND');
+    const row: Provider = { id: uid('provider'), hospitalId: input.hospitalId, departmentId: input.departmentId,
+      name: input.name.trim(), specialty: input.specialty?.trim() || null, qualification: input.qualification?.trim() || null,
+      active: input.active ?? true };
+    load().providers.push(row); save(); return { ...row };
+  },
+
+  async listProviderSchedules(providerId) {
+    return load().providerSchedules.filter((s) => !providerId || s.providerId === providerId).map((s) => ({ ...s }));
+  },
+
+  async createProviderSchedule(input: NewProviderSchedule) {
+    const provider = load().providers.find((p) => p.id === input.providerId);
+    if (!provider) throw new Error('NOT_FOUND');
+    const row: ProviderSchedule = { id: uid('schedule'), providerId: input.providerId, weekday: input.weekday,
+      startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone ?? 'Asia/Kolkata', active: input.active ?? true };
+    load().providerSchedules.push(row); save(); return { ...row };
+  },
+
+  async listOperationalSlots(hospitalId) {
+    const sessions = await demoRepo.listSessions(hospitalId ? [hospitalId] : undefined);
+    const seeded: OperationalSlot[] = sessions.map((s) => ({
+      id: s.id, hospitalId: s.hospitalId, departmentId: s.departmentId, providerId: s.providerId ?? null,
+      serviceSlug: s.serviceSlug ?? null, startsAt: `${s.date}T${s.startTime}:00+05:30`, endsAt: `${s.date}T${s.endTime}:00+05:30`,
+      kind: 'appointment', capacity: s.capacity, booked: s.booked, bookingOpen: s.status === 'open',
+      slotType: s.slotType ?? 'approval_required', waitlistEnabled: s.waitlistEnabled ?? true,
+      approvalResponseWindowMinutes: s.approvalResponseWindowMinutes ?? 240, recoveryPolicy: s.recoveryPolicy ?? 'offer_alternatives',
+      expiresAt: s.approvalDeadline ?? null, updatedAt: s.updatedAt ?? new Date().toISOString(), source: 'demo_simulated',
+    }));
+    const created = load().operationalSlots.filter((s) => !hospitalId || s.hospitalId === hospitalId);
+    return [...seeded, ...created].map((s) => ({ ...s }));
+  },
+
+  async createOperationalSlot(input: NewOperationalSlot) {
+    const dept = (await demoRepo.listOperationalDepartments()).find((d) => d.id === input.departmentId);
+    if (!dept) throw new Error('NOT_FOUND');
+    const hospitalId = dept.hospitalId;
+    const row: OperationalSlot = { id: uid('slot'), hospitalId, departmentId: input.departmentId, providerId: input.providerId ?? null,
+      serviceSlug: input.serviceSlug ?? null, startsAt: input.startsAt, endsAt: input.endsAt, kind: input.kind ?? 'appointment',
+      capacity: input.capacity, booked: 0, bookingOpen: input.bookingOpen ?? true, slotType: input.slotType,
+      waitlistEnabled: input.waitlistEnabled ?? input.slotType === 'waitlist', approvalResponseWindowMinutes: input.approvalResponseWindowMinutes ?? 240,
+      recoveryPolicy: input.recoveryPolicy ?? 'offer_alternatives', expiresAt: input.expiresAt ?? null,
+      updatedAt: new Date().toISOString(), source: 'demo_simulated' };
+    load().operationalSlots.push(row); save(); return { ...row };
+  },
+
+  async updateOperationalSlot(id, patch) {
+    const existing = (await demoRepo.listOperationalSlots()).find((s) => s.id === id);
+    if (!existing) throw new Error('NOT_FOUND');
+    if (id.startsWith('slot-') && !load().operationalSlots.some((s) => s.id === id)) throw new Error('DEMO_SEED_READ_ONLY');
+    const row = { ...existing, ...patch, updatedAt: new Date().toISOString() } as OperationalSlot;
+    const index = load().operationalSlots.findIndex((s) => s.id === id);
+    if (index >= 0) load().operationalSlots[index] = row;
+    else load().operationalSlots.push(row);
+    save(); return { ...row };
+  },
+
+  async listQueueEntries(filters: QueueListFilters = {}) {
+    const s = load();
+    let entries = s.queueEntries;
+    if (filters.hospitalId) entries = entries.filter((e) => e.hospitalId === filters.hospitalId);
+    if (filters.departmentId) entries = entries.filter((e) => e.departmentId === filters.departmentId);
+    if (filters.status) entries = entries.filter((e) => e.status === filters.status);
+    return { entries: entries.slice().sort((a, b) => b.lastUpdatedAt.localeCompare(a.lastUpdatedAt)), source: 'demo_simulated' as const, updatedAt: new Date().toISOString(), staleAfterMinutes: 5 };
+  },
+
+  async expireDueCareRequests() {
+    const due = load().careRequests.filter((r) => r.state === 'APPROVAL_PENDING' && r.approvalDeadline && new Date(r.approvalDeadline) <= new Date());
+    let count = 0;
+    for (const row of due) {
+      try { await demoRepo.transitionCareRequest({ careRequestId: row.id, action: 'expire_approval', actorId: row.patientId, actorRole: 'system', actor: 'system', expectedVersion: row.version, reason: 'Approval deadline passed without a hospital decision.', metadata: { reason: 'hospital_no_response' } }); count += 1; } catch { /* another worker may have won the version race */ }
+    }
+    return count;
   },
 
   async listNotifications(audience, recipientId): Promise<Notification[]> {

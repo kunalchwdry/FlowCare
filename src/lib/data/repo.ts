@@ -1,4 +1,12 @@
 import type {
+  CareAccessMetrics, CareAccessOption, CareAccessRequest, CareAccessTransitionInput,
+  CareEpisode, CareStateTransition, CareTask, CapacitySignal, NewCareAccessRequest, NewCareTask,
+  QueueEntry,
+} from '@/lib/careAccess/types';
+import type {
+  NewOperationalDepartment, NewOperationalService, NewOperationalSlot, NewProvider, NewProviderSchedule, OperationalDepartment, OperationalService, OperationalSlot, Provider, ProviderSchedule, QueueListFilters,
+} from '@/lib/operations/types';
+import type {
   AccessibilityComponent, Appointment, AppointmentMessage, ArrivalPack, CareContext,
   ClinicSession, FacilityCharge, FacilityCorrection, Favorite, FollowUpTask, Hospital,
   HospitalReview, LanguageSupport, ModerationEvent, PrepRequirement, QueueSnapshot,
@@ -30,6 +38,35 @@ export interface Repo {
   listAppointmentEvents(appointmentId: string): Promise<AppointmentEvent[]>;
   listAppointmentMessages(appointmentId: string): Promise<AppointmentMessage[]>;
   sendAppointmentMessage(input: NewAppointmentMessage): Promise<AppointmentMessage>;
+
+  /* ------------------------------------------------ care access exchange */
+  listCareRequests(opts: { patientId?: string; hospitalId?: string }): Promise<CareAccessRequest[]>;
+  getCareRequest(id: string): Promise<CareAccessRequest | null>;
+  createCareRequest(input: NewCareAccessRequest): Promise<CareAccessRequest>;
+  listCareOptions(careRequestId: string): Promise<CareAccessOption[]>;
+  saveCareOptions(careRequestId: string, options: CareAccessOption[]): Promise<CareAccessOption[]>;
+  transitionCareRequest(input: CareAccessTransitionInput): Promise<CareAccessRequest>;
+  listCareTransitions(careRequestId: string): Promise<CareStateTransition[]>;
+  listCareEpisodes(opts: { patientId?: string; hospitalId?: string }): Promise<CareEpisode[]>;
+  listCareTasks(opts: { patientId?: string; hospitalId?: string; careRequestId?: string }): Promise<CareTask[]>;
+  createCareTask(input: NewCareTask): Promise<CareTask>;
+  updateCareTask(id: string, actorId: string, status: CareTask['status'], resolution?: string | null): Promise<CareTask>;
+  listCapacitySignals(hospitalIds?: string[]): Promise<CapacitySignal[]>;
+  publishCapacitySignal(input: Omit<CapacitySignal, 'id' | 'updatedAt'>): Promise<CapacitySignal>;
+  getCareAccessMetrics(hospitalId?: string): Promise<CareAccessMetrics>;
+  listOperationalDepartments(hospitalId?: string): Promise<OperationalDepartment[]>;
+  createOperationalDepartment(input: NewOperationalDepartment): Promise<OperationalDepartment>;
+  listOperationalServices(hospitalId?: string): Promise<OperationalService[]>;
+  createOperationalService(input: NewOperationalService): Promise<OperationalService>;
+  listProviders(hospitalId?: string): Promise<Provider[]>;
+  createProvider(input: NewProvider): Promise<Provider>;
+  listProviderSchedules(providerId?: string): Promise<ProviderSchedule[]>;
+  createProviderSchedule(input: NewProviderSchedule): Promise<ProviderSchedule>;
+  listOperationalSlots(hospitalId?: string): Promise<OperationalSlot[]>;
+  createOperationalSlot(input: NewOperationalSlot): Promise<OperationalSlot>;
+  updateOperationalSlot(id: string, patch: Partial<NewOperationalSlot>): Promise<OperationalSlot>;
+  listQueueEntries(filters?: QueueListFilters): Promise<{ entries: QueueEntry[]; source: 'database' | 'demo_simulated'; updatedAt: string; staleAfterMinutes: number }>;
+  expireDueCareRequests(): Promise<number>;
 
   listNotifications(audience: 'patient' | 'hospital', recipientId: string): Promise<Notification[]>;
   markNotificationsRead(audience: 'patient' | 'hospital', recipientId: string): Promise<void>;

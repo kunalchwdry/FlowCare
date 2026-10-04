@@ -10,6 +10,13 @@
 process.env.FLOWCARE_DEMO_MODE = 'true';
 process.env.TZ = 'Asia/Kolkata';
 
+// The demo repository is intentionally file-backed for a running app. Tests
+// need a clean baseline so an earlier run cannot turn an appointment request
+// into a confirmed appointment before a tampering assertion starts.
+import fs from 'node:fs';
+import path from 'node:path';
+fs.rmSync(path.join(process.cwd(), '.data', 'demo-state.json'), { force: true });
+
 import { afterEach } from 'vitest';
 import { __resetRateLimits } from '../src/lib/ratelimit';
 import { __resetAnalytics } from '../src/lib/analytics';
