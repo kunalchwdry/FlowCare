@@ -115,6 +115,7 @@ function openAiCompatible(cfg: {
   id: string; label: string; note: string; baseUrl: string;
   keyEnv: () => string | undefined; modelEnv: () => string | undefined; defaultModel: string;
   extraHeaders?: () => Record<string, string>;
+  maxTokensField?: 'max_tokens' | 'max_completion_tokens';
 }): LlmProvider {
   return {
     id: cfg.id,
@@ -131,7 +132,7 @@ function openAiCompatible(cfg: {
         {
           model: credentials?.model ?? cfg.modelEnv() ?? cfg.defaultModel,
           temperature: 0,
-          max_tokens: maxOutputTokens,
+          [cfg.maxTokensField ?? 'max_tokens']: maxOutputTokens,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: system },
@@ -200,6 +201,7 @@ export const PROVIDERS: LlmProvider[] = [
     baseUrl: 'https://api.groq.com/openai/v1',
     keyEnv: () => s(process.env.GROQ_API_KEY),
     modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'llama-3.3-70b-versatile',
+    maxTokensField: 'max_completion_tokens',
   }),
   openAiCompatible({
     id: 'nvidia', label: 'NVIDIA NIM', note: 'integrate.api.nvidia.com',
@@ -246,10 +248,9 @@ export function listProviders(): ProviderInfo[] {
 export function getProvider(id?: string | null): LlmProvider | null {
   const wanted = id ?? env.aiDefaultProvider();
   const exact = PROVIDERS.find((p) => p.id === wanted);
-  if (exact?.isConfigured()) return exact;
-  // Never silently use a provider the user did not pick when they picked one.
-  if (id) return null;
-  return PROVIDERS.find((p) => p.isConfigured()) ?? null;
+  // The application-managed provider is an explicit deployment choice. Do
+  // not silently fall back to Gemini (or another provider) after migration.
+  return exact?.isConfigured() ? exact : null;
 }
 
 /**
@@ -265,5 +266,5 @@ export function getProviderById(id: string): LlmProvider | null {
 }
 
 export function anyProviderConfigured(): boolean {
-  return PROVIDERS.some((p) => p.isConfigured());
+  return Boolean(getProvider());
 }
