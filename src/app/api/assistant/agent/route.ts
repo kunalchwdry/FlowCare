@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     // ---- one application-owned provider -------------------------------
     // The browser cannot choose a vendor or supply a credential. Switching
     // to a future FlowCare model remains a server-only provider change.
-    const provider = getProvider('gemini');
+    const provider = getProvider();
     const usable = Boolean(provider);
 
     // ---- step 1: understand the request ----------------------------------
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
     }
 
     const aiMeta = {
-      provider: usable ? 'gemini' : null,
+      provider: usable ? provider!.id : null,
       model: usable ? provider!.model() : null,
       source: aiSource,
       keySource: usable ? 'server' : 'none',
