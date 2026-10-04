@@ -50,8 +50,25 @@ async function generateConversationalReply(
       timeoutMs: env.aiTimeoutMs(),
       maxOutputTokens: 220,
     });
-    const parsed = ConversationalReplySchema.safeParse(JSON.parse(raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()));
-    return parsed.success ? parsed.data.reply : null;
+    const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    try {
+      const parsed = ConversationalReplySchema.safeParse(JSON.parse(cleaned));
+      if (parsed.success) return parsed.data.reply;
+    } catch {
+      // Some Groq models may answer in plain text despite JSON mode. The
+      // conversational route can safely use that bounded text; directory
+      // extraction remains strict JSON-only below.
+    }
+    const objectText = cleaned.match(/\{[\s\S]*\}/)?.[0];
+    if (objectText) {
+      try {
+        const parsed = ConversationalReplySchema.safeParse(JSON.parse(objectText));
+        if (parsed.success) return parsed.data.reply;
+      } catch {
+        // Continue to the bounded plain-text fallback.
+      }
+    }
+    return cleaned.length > 0 && cleaned.length <= 700 ? cleaned : null;
   } catch {
     // The deterministic scope response remains the safe fallback if Gemini
     // is unavailable or returns an unexpected shape.
