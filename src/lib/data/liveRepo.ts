@@ -535,6 +535,26 @@ export const liveRepo: Repo = {
   async listCapacitySignals(hospitalIds) { return (await careRepo()).listCapacitySignals(hospitalIds); },
   async publishCapacitySignal(input) { return (await careRepo()).publishCapacitySignal(input); },
   async getCareAccessMetrics(hospitalId) { return (await careRepo()).getCareAccessMetrics(hospitalId); },
+
+  // Live-read mode must never fall through to demoRepo for hospital supply
+  // management. The old spread inherited the demo CRUD methods, so a real
+  // manager could open Operations but creating a department searched the demo
+  // seed and returned NOT_FOUND. Delegate every operational mutation/read to
+  // the RLS-scoped Supabase adapter instead.
+  async listOperationalDepartments(hospitalId) { return (await careRepo()).listOperationalDepartments(hospitalId); },
+  async createOperationalDepartment(input) { return (await careRepo()).createOperationalDepartment(input); },
+  async listOperationalServices(hospitalId) { return (await careRepo()).listOperationalServices(hospitalId); },
+  async createOperationalService(input) { return (await careRepo()).createOperationalService(input); },
+  async listProviders(hospitalId) { return (await careRepo()).listProviders(hospitalId); },
+  async createProvider(input) { return (await careRepo()).createProvider(input); },
+  async listProviderSchedules(providerId) { return (await careRepo()).listProviderSchedules(providerId); },
+  async createProviderSchedule(input) { return (await careRepo()).createProviderSchedule(input); },
+  async listOperationalSlots(hospitalId) { return (await careRepo()).listOperationalSlots(hospitalId); },
+  async createOperationalSlot(input) { return (await careRepo()).createOperationalSlot(input); },
+  async updateOperationalSlot(id, patch) { return (await careRepo()).updateOperationalSlot(id, patch); },
+  async listQueueEntries(filters) { return (await careRepo()).listQueueEntries(filters); },
+  async expireDueCareRequests() { return (await careRepo()).expireDueCareRequests(); },
+
   async getFacilityFacts(hospitalId) { return (await careRepo()).getFacilityFacts(hospitalId); },
   async listServiceVerifications(hospitalIds) { return (await careRepo()).listServiceVerifications(hospitalIds); },
   async listSchemeListings(hospitalIds) { return (await careRepo()).listSchemeListings(hospitalIds); },
