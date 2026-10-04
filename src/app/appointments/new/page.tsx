@@ -38,6 +38,7 @@ export default async function NewAppointmentPage({
     .filter((s) => !department || s.departmentId.endsWith(`:dept:${department}`))
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 12);
+  const noDepartments = depts.length === 0;
 
   return (
     <div className="space-y-4 py-2">
@@ -51,54 +52,75 @@ export default async function NewAppointmentPage({
         <h1 className="text-lg font-extrabold">Book an appointment</h1>
         <p className="mt-0.5 text-sm text-ink-600">{hospital.name} — {hospital.addressLine}</p>
         <p className="mt-2 rounded-xl bg-brand-50 px-3 py-2 text-[11px] text-brand-900 ring-1 ring-brand-200">
-          You are asking the hospital for a slot. It is a request until the hospital confirms it — FlowCare cannot
-          confirm an appointment on a hospital's behalf. Queue tracking and check-in remain the Phase 1 workflow.
+          {noDepartments
+            ? 'No appointment request has been sent yet. This hospital has not published a department or appointment slot in FlowCare.'
+            : 'You are asking the hospital for a slot. It is a request until the hospital confirms it — FlowCare cannot confirm an appointment on a hospital\'s behalf.'}
         </p>
       </header>
 
-      <section className="fc-card p-5">
-        <h2 className="text-sm font-bold">Choose a department</h2>
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {depts.map((d) => (
-            <Link
-              key={d.id}
-              href={`/appointments/new?hospital=${hospital.slug}&department=${d.specialty}`}
-              className={department === d.specialty ? 'fc-chip-on' : 'fc-chip-off'}
-            >
-              {d.name}
-              {availability.bySpecialty[d.specialty] ? (
-                <span className="font-bold text-brand-700">{availability.bySpecialty[d.specialty]}</span>
-              ) : (
-                <span className="opacity-50">0</span>
-              )}
-            </Link>
-          ))}
-        </div>
-      </section>
+      {noDepartments ? (
+        <section className="fc-card border-amber-200 bg-amber-50 p-5" role="status">
+          <h2 className="text-sm font-bold text-amber-950">Appointments are not open at this hospital yet</h2>
+          <p className="mt-2 text-sm leading-relaxed text-amber-900">
+            The hospital has not configured a department or published a slot. FlowCare will not invent one,
+            so there is nothing you can select and no request has reached the hospital.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/care-access" className="fc-btn-primary text-xs">Describe what care you need</Link>
+            <Link href={`/hospitals/${hospital.slug}`} className="fc-btn-secondary text-xs">Back to hospital profile</Link>
+          </div>
+          <p className="mt-3 text-[11px] text-amber-800">
+            Hospital staff can make this bookable from Hospital portal → Operations by adding a department and
+            publishing a real slot.
+          </p>
+        </section>
+      ) : (
+        <>
+          <section className="fc-card p-5">
+            <h2 className="text-sm font-bold">Choose a department</h2>
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {depts.map((d) => (
+                <Link
+                  key={d.id}
+                  href={`/appointments/new?hospital=${hospital.slug}&department=${d.specialty}`}
+                  className={department === d.specialty ? 'fc-chip-on' : 'fc-chip-off'}
+                >
+                  {d.name}
+                  {availability.bySpecialty[d.specialty] ? (
+                    <span className="font-bold text-brand-700">{availability.bySpecialty[d.specialty]}</span>
+                  ) : (
+                    <span className="opacity-50">0</span>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </section>
 
-      <section className="fc-card p-5">
-        <h2 className="text-sm font-bold">
-          Choose a date and time {department && <span className="text-ink-500">· {label(department)}</span>}
-        </h2>
-        <p className="mt-0.5 text-[11px] text-ink-500">
-          FlowCare session data, computed {formatDateTime(availability.computedAt)}.
-        </p>
-        <div className="mt-3">
-          <SlotPicker
-            signedIn={Boolean(user)}
-            windowDays={availability.windowDays}
-            slots={open.map((s) => ({
-              id: s.id,
-              date: s.date,
-              startTime: s.startTime,
-              endTime: s.endTime,
-              capacity: s.capacity,
-              booked: s.booked,
-              departmentLabel: label(s.departmentId.split(':dept:')[1] ?? ''),
-            }))}
-          />
-        </div>
-      </section>
+          <section className="fc-card p-5">
+            <h2 className="text-sm font-bold">
+              Choose a date and time {department && <span className="text-ink-500">· {label(department)}</span>}
+            </h2>
+            <p className="mt-0.5 text-[11px] text-ink-500">
+              FlowCare session data, computed {formatDateTime(availability.computedAt)}.
+            </p>
+            <div className="mt-3">
+              <SlotPicker
+                signedIn={Boolean(user)}
+                windowDays={availability.windowDays}
+                slots={open.map((s) => ({
+                  id: s.id,
+                  date: s.date,
+                  startTime: s.startTime,
+                  endTime: s.endTime,
+                  capacity: s.capacity,
+                  booked: s.booked,
+                  departmentLabel: label(s.departmentId.split(':dept:')[1] ?? ''),
+                }))}
+              />
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }

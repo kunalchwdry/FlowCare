@@ -16,10 +16,14 @@ export default async function HospitalDashboard() {
   const { actor } = gate;
 
   const repo = await getRepo();
-  const [hospital, appointments] = await Promise.all([
+  const [hospital, appointments, sessions] = await Promise.all([
     repo.getHospital(actor.hospitalId),
     repo.listAppointments({ hospitalId: actor.hospitalId }),
+    repo.listSessions([actor.hospitalId]),
   ]);
+  const activeDepartmentCount = hospital?.departments.filter((d) => d.active).length ?? 0;
+  const openSlotCount = sessions.filter((s) => s.status === 'open' && s.capacity > s.booked).length;
+  const needsSupplySetup = activeDepartmentCount === 0 || openSlotCount === 0;
 
   // Events are per-appointment; gather only this hospital's.
   const eventLists = await Promise.all(
@@ -72,6 +76,27 @@ export default async function HospitalDashboard() {
           <p className="mt-1 text-xs text-ink-500">
             New appointment requests will appear here as patients send them.
           </p>
+        </div>
+      )}
+
+      {needsSupplySetup && (actor.permissions.includes('structure:manage') || actor.permissions.includes('slots:manage')) && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-bold text-amber-950">Patients cannot request an appointment yet</p>
+              <p className="mt-1 max-w-2xl text-xs leading-relaxed text-amber-900">
+                {activeDepartmentCount === 0
+                  ? 'Add at least one department before patients can tell you what service they need.'
+                  : 'Publish at least one future open slot so patients can choose a real time and send a request.'}
+              </p>
+              <p className="mt-1 text-[11px] text-amber-800">
+                Current supply: {activeDepartmentCount} active department{activeDepartmentCount === 1 ? '' : 's'} · {openSlotCount} open slot{openSlotCount === 1 ? '' : 's'}.
+              </p>
+            </div>
+            <Link href="/hospital/operations" className="fc-btn-primary !min-h-[36px] !py-2 text-xs">
+              Configure operations
+            </Link>
+          </div>
         </div>
       )}
 

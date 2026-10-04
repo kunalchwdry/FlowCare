@@ -608,6 +608,7 @@ export function createSupabaseRepo(
         p_slot: input.sessionId,
         p_name: name.slice(0, 120),
         p_key: idempotencyKey(['book', input.sessionId, auth.user.id]),
+        p_request_note: input.reason ?? null,
       });
       if (res.error) {
         const message = String(res.error.message ?? 'BOOKING_FAILED');
