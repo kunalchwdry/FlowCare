@@ -1,11 +1,5 @@
 import { NextRequest } from 'next/server';
-import {
-  GoogleGenAI,
-  Modality,
-  MediaResolution,
-  type LiveServerMessage,
-  type Session,
-} from '@google/genai';
+import type { LiveServerMessage, Session } from '@google/genai';
 import { env } from '@/lib/env';
 import { clientKey, rateLimit } from '@/lib/ratelimit';
 
@@ -132,6 +126,11 @@ export async function POST(req: NextRequest) {
       let session: Session | undefined;
 
       try {
+        // Next/Vercel can bundle ws's optional native bufferutil module as an
+        // object without its mask function. Force ws's portable implementation
+        // before dynamically loading the Live SDK.
+        process.env.WS_NO_BUFFER_UTIL = '1';
+        const { GoogleGenAI, Modality, MediaResolution } = await import('@google/genai');
         const ai = new GoogleGenAI({ apiKey });
         const responseQueue: LiveServerMessage[] = [];
         const audioParts: string[] = [];
