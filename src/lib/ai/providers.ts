@@ -101,8 +101,12 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       cache: 'no-store',
     });
     if (!res.ok) {
-      // Log status only. Never log the prompt or the provider's body.
-      throw new Error(`provider_http_${res.status}`);
+      const upstream = await res.text();
+      const safeDetail = upstream
+        .slice(0, 240)
+        .replace(/gsk_[A-Za-z0-9_-]+/gi, '[redacted-key]')
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
+      throw new Error(`provider_http_${res.status}${safeDetail ? `: ${safeDetail}` : ''}`);
     }
     return await res.json();
   } finally {

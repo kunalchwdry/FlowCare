@@ -40,8 +40,8 @@ async function generateConversationalReply(
   query: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   language: 'en' | 'hi',
-): Promise<string | null> {
-  if (!provider) return null;
+): Promise<{ reply: string | null; error: string | null }> {
+  if (!provider) return { reply: null, error: 'provider_not_configured' };
   try {
     const context = history.slice(-6).map((turn) => `${turn.role}: ${turn.content.slice(0, 500)}`).join('\\n');
     const raw = await provider.completeJson({
@@ -53,7 +53,7 @@ async function generateConversationalReply(
     const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
     try {
       const parsed = ConversationalReplySchema.safeParse(JSON.parse(cleaned));
-      if (parsed.success) return parsed.data.reply;
+      if (parsed.success) return { reply: parsed.data.reply, error: null };
     } catch {
       // Some Groq models may answer in plain text despite JSON mode. The
       // conversational route can safely use that bounded text; directory
@@ -63,16 +63,20 @@ async function generateConversationalReply(
     if (objectText) {
       try {
         const parsed = ConversationalReplySchema.safeParse(JSON.parse(objectText));
-        if (parsed.success) return parsed.data.reply;
+        if (parsed.success) return { reply: parsed.data.reply, error: null };
       } catch {
         // Continue to the bounded plain-text fallback.
       }
     }
-    return cleaned.length > 0 && cleaned.length <= 700 ? cleaned : null;
-  } catch {
-    // The deterministic scope response remains the safe fallback if Gemini
-    // is unavailable or returns an unexpected shape.
-    return null;
+    return {
+      reply: cleaned.length > 0 && cleaned.length <= 700 ? cleaned : null,
+      error: cleaned.length > 0 && cleaned.length <= 700 ? null : 'provider_bad_shape',
+    };
+  } catch (error) {
+    // The deterministic scope response remains the safe fallback if Groq is
+    // unavailable or returns an unexpected shape. Keep only a bounded error
+    // code for diagnostics; never return provider credentials or prompts.
+    return { reply: null, error: error instanceof Error ? error.message.slice(0, 240) : 'provider_error' };
   }
 }
 
@@ -153,7 +157,8 @@ export async function POST(req: NextRequest) {
     // data-derived so the model cannot invent hospitals.
     if (!DIRECTORY_QUERY.test(normalizedQuery)) {
       const conversationalProvider = getProvider();
-      const aiReply = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
+      const conversational = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
+      const aiReply = conversational.reply;
       const fallbackReply = body.language === 'hi'
         ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
         : 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.';
@@ -167,7 +172,7 @@ export async function POST(req: NextRequest) {
           model: aiReply ? conversationalProvider?.model() ?? null : null,
           latencyMs: null,
         },
-        aiUnavailableReason: null,
+        aiUnavailableReason: conversational.error,
         safetyNotice: null,
         scopeNotice: SCOPE_NOTICE,
         locationNotice: null,
