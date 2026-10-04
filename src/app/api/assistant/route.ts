@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { EMERGENCY_NOTICE, SCOPE_NOTICE } from '@/lib/ai/notices';
 import { getRepo } from '@/lib/data';
 import { extractIntent } from '@/lib/ai/intent';
-import { getProvider } from '@/lib/ai/providers';
+import { getProvider, type LlmProvider } from '@/lib/ai/providers';
+import { FLOWCARE_SYSTEM_PROMPT } from '@/lib/ai/prompts';
 import { DiscoveryFiltersSchema, type DiscoveryFilters } from '@/lib/discovery/filters';
 import { searchHospitals } from '@/lib/discovery/search';
 import { makeExternalFetcher } from '@/lib/places/enrich';
@@ -28,11 +29,36 @@ const Body = z.object({
   language: z.enum(['en', 'hi']).default('en'),
 }).strict();
 
-const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction|unconscious|can't breathe|cannot breathe|severe bleeding|heart attack|stroke|overdose|suicid(?:e|al)|self[- ]harm)\b/i;
+const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction|unconscious|can't breathe|cannot breathe|severe bleeding|heart attack|cardiac attack|cardiac arrest|cardiac emergency|stroke|overdose|suicid(?:e|al)|self[- ]harm)\b/i;
 const EMOTIONAL_SUPPORT_QUERY = /\b(i(?:'m| am)\s+(?:feeling\s+)?(?:sad|depressed|anxious|lonely|hopeless)|feeling\s+(?:sad|low|hopeless|unsafe)|want\s+to\s+die|hurt myself|self[- ]harm)\b/i;
 const EMOTIONAL_SUPPORT_NOTICE = 'If you might hurt yourself or are in immediate danger, call 112 in India or go to the nearest emergency department now. If you are safe right now, FlowCare can help you find a mental-health professional, but it cannot provide crisis counselling.';
-const GENERAL_SCOPE_QUERY = /\b(help|what can you do|how can you help|who are you|what is flowcare|assist me|support me)\b/i;
+const ConversationalReplySchema = z.object({ reply: z.string().trim().min(1).max(700) }).strict();
+const GENERAL_SCOPE_QUERY = /\b(help|what can you do|how can you help|who are you|what is flowcare|what do (?:you|i) need|what do you want|what do you know about me|what(?:'s| is) my name|who am i|assist me|support me)\b/i;
 const DIRECTORY_QUERY = /\b(hospital|clinic|doctor|specialist|department|appointment|book|booking|slot|availability|near me|nearby|compare|find|psychiatry|mental health)\b/i;
+
+async function generateConversationalReply(
+  provider: LlmProvider | null,
+  query: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  language: 'en' | 'hi',
+): Promise<string | null> {
+  if (!provider) return null;
+  try {
+    const context = history.slice(-6).map((turn) => `${turn.role}: ${turn.content.slice(0, 500)}`).join('\\n');
+    const raw = await provider.completeJson({
+      system: `${FLOWCARE_SYSTEM_PROMPT}\\n\\nThis is a short conversational reply, not a hospital search. Answer the user's question helpfully within FlowCare's real scope. If they ask what FlowCare needs, explain that a care need and city or area are useful, while location access is optional. If they ask for their name or personal data, say you only know what they share in this chat. Do not diagnose or give treatment advice. Keep the reply under 100 words. Respond in ${language === 'hi' ? 'Hindi' : 'English'}. Return only JSON in the form {"reply":"..."}.`,
+      user: `${context ? `Recent context:\\n${context}\\n\\n` : ''}Latest user message:\\n${query}`,
+      timeoutMs: env.aiTimeoutMs(),
+      maxOutputTokens: 220,
+    });
+    const parsed = ConversationalReplySchema.safeParse(JSON.parse(raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()));
+    return parsed.success ? parsed.data.reply : null;
+  } catch {
+    // The deterministic scope response remains the safe fallback if Gemini
+    // is unavailable or returns an unexpected shape.
+    return null;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -105,15 +131,25 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Short help/scope questions are not directory searches. Keep this
-    // deterministic so a missing or unavailable provider cannot turn “help”
-    // into the generic no-hospital result.
+    // General questions use Gemini for the conversational reply. The fixed
+    // fallback keeps the bubble useful if Gemini is unavailable; directory
+    // replies below remain data-derived so the model cannot invent hospitals.
     if (GENERAL_SCOPE_QUERY.test(normalizedQuery) && !DIRECTORY_QUERY.test(normalizedQuery)) {
+      const conversationalProvider = getProvider('gemini');
+      const aiReply = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
+      const fallbackReply = body.language === 'hi'
+        ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
+        : 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.';
       return ok({
-        reply: body.language === 'hi'
-          ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
-          : 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.',
-        understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
+        reply: aiReply ?? fallbackReply,
+        understood: {
+          filters: {},
+          explanation: [],
+          source: aiReply ? 'llm' : 'deterministic',
+          provider: aiReply ? conversationalProvider?.id ?? null : null,
+          model: aiReply ? conversationalProvider?.model() ?? null : null,
+          latencyMs: null,
+        },
         aiUnavailableReason: null,
         safetyNotice: null,
         scopeNotice: SCOPE_NOTICE,
