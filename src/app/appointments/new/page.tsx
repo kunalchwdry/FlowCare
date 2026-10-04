@@ -57,6 +57,7 @@ export default async function NewAppointmentPage({
     .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`))
     .slice(0, 12);
   const noDepartments = depts.length === 0;
+  const hasInstantSlots = open.some((s) => s.slotType === 'instant');
 
   return (
     <div className="space-y-4 py-2">
@@ -72,7 +73,9 @@ export default async function NewAppointmentPage({
         <p className="mt-2 rounded-xl bg-brand-50 px-3 py-2 text-[11px] text-brand-900 ring-1 ring-brand-200">
           {noDepartments
             ? 'No appointment request has been sent yet. This hospital has not published a department or appointment slot in FlowCare.'
-            : 'You are asking the hospital for a slot. It is a request until the hospital confirms it — FlowCare cannot confirm an appointment on a hospital\'s behalf.'}
+            : hasInstantSlots
+              ? 'Instant slots are confirmed immediately when booked. Approval-required slots remain requests until the hospital confirms them.'
+              : 'You are asking the hospital for a slot. It is a request until the hospital confirms it — FlowCare cannot confirm an appointment on a hospital\'s behalf.'}
         </p>
       </header>
 
@@ -133,6 +136,7 @@ export default async function NewAppointmentPage({
                   capacity: s.capacity,
                   booked: s.booked,
                   departmentLabel: depts.find((d) => matchesDepartment(s, d))?.name ?? label(s.departmentId.split(':dept:')[1] ?? ''),
+                  slotType: s.slotType ?? 'approval_required',
                 }))}
               />
             </div>

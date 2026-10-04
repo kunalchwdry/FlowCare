@@ -9,11 +9,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Appointment REQUEST.
+ * Appointment booking/request.
  *
- * The patient asks for a published slot; the hospital has not agreed to
- * anything yet. The response says so explicitly via `confirmed: false` so no
- * caller can mistake a request for a confirmed booking.
+ * Approval-required slots create a pending request. Instant slots are already
+ * authorized by the hospital's published policy and return a confirmed
+ * appointment. The response reports which branch actually happened.
  *
  * The client sends a session id and nothing else that matters: department,
  * hospital and time are all read from the session server-side, so a tampered
@@ -44,9 +44,12 @@ export async function GET(req: NextRequest) {
     if (!hospital) return fail(404, 'Hospital not found.');
 
     const department = req.nextUrl.searchParams.get('department');
+    const selectedDepartment = department
+      ? hospital.departments.find((d) => d.id === department || d.specialty === department)
+      : null;
     const sessions = (await repo.listSessions([hospital.id]))
       .filter((s) => s.status === 'open' && s.capacity > s.booked)
-      .filter((s) => !department || s.departmentId.endsWith(`:dept:${department}`))
+      .filter((s) => !selectedDepartment || s.departmentId === selectedDepartment.id || s.departmentId.endsWith(`:dept:${selectedDepartment.specialty}`))
       .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`));
 
     return ok({
@@ -105,10 +108,12 @@ export async function POST(req: NextRequest) {
     return ok(
       {
         appointment,
-        // Read by the UI so the receipt cannot imply more than happened.
-        confirmed: false,
-        notice:
-          'Requested. The hospital has not confirmed this yet — wait for confirmation before travelling.',
+        // Instant slots are pre-authorized by the hospital; approval-required
+        // slots remain requests until the hospital decides.
+        confirmed: appointment.status === 'booked',
+        notice: appointment.status === 'booked'
+          ? 'Booked. This instant slot was confirmed by the hospital\'s published booking policy.'
+          : 'Requested. The hospital has not confirmed this yet — wait for confirmation before travelling.',
       },
       { status: 201 },
     );
