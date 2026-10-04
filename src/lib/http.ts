@@ -35,6 +35,18 @@ export function handleError(e: unknown) {
   if (e instanceof Error && e.message === 'SUPABASE_UNAVAILABLE') {
     return fail(503, 'The live data service is not configured on this deployment.', { code: e.message });
   }
+  if (e instanceof Error) {
+    const known = [
+      { code: 'FORBIDDEN', status: 403, message: 'You do not have permission to change this hospital configuration.' },
+      { code: 'NOT_FOUND', status: 404, message: 'That hospital record could not be found.' },
+      { code: 'INVALID_INPUT', status: 400, message: 'Check the configuration values and try again.' },
+      { code: 'BOOKING_CLOSED', status: 409, message: 'That slot is no longer open.' },
+      { code: 'CAPACITY_FULL', status: 409, message: 'That slot has filled up.' },
+      { code: 'WAITLIST_REQUIRED', status: 409, message: 'That slot requires joining the waitlist.' },
+    ] as const;
+    const match = known.find((item) => e.message.includes(item.code));
+    if (match) return fail(match.status, match.message, { code: match.code });
+  }
   console.error('[flowcare] unhandled error', e instanceof Error ? e.message : e);
   return fail(500, 'Something went wrong. Please try again.');
 }
