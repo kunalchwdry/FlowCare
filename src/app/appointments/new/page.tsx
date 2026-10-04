@@ -33,10 +33,28 @@ export default async function NewAppointmentPage({
   const sessions = await repo.listSessions([hospital.id]);
   const availability = computeAvailability(hospital.id, sessions);
   const depts = hospital.departments.filter((d) => d.active);
+  const todayKey = availability.computedAt.slice(0, 10);
+  const horizonKey = new Date(new Date(`${todayKey}T00:00:00Z`).getTime() + availability.windowDays * 86_400_000)
+    .toISOString().slice(0, 10);
+  const matchesDepartment = (session: (typeof sessions)[number], dept: (typeof depts)[number]) =>
+    session.departmentId === dept.id || session.departmentId.endsWith(`:dept:${dept.specialty}`);
+  const freeInWindow = (dept: (typeof depts)[number]) => sessions
+    .filter((s) => matchesDepartment(s, dept))
+    .filter((s) => s.date >= todayKey && s.date <= horizonKey)
+    .filter((s) => s.status === 'open' && s.capacity > s.booked)
+    .reduce((total, s) => total + (s.capacity - s.booked), 0);
+  // A legacy link may still contain the specialty slug. Prefer the matching
+  // department with actual published supply when duplicate legacy names exist.
+  const selectedDepartment = department
+    ? depts
+        .filter((d) => d.id === department || d.specialty === department)
+        .sort((a, b) => freeInWindow(b) - freeInWindow(a))[0] ?? null
+    : null;
   const open = sessions
     .filter((s) => s.status === 'open' && s.capacity > s.booked)
-    .filter((s) => !department || s.departmentId.endsWith(`:dept:${department}`))
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((s) => s.date >= todayKey && s.date <= horizonKey)
+    .filter((s) => !selectedDepartment || matchesDepartment(s, selectedDepartment))
+    .sort((a, b) => `${a.date}${a.startTime}`.localeCompare(`${b.date}${b.startTime}`))
     .slice(0, 12);
   const noDepartments = depts.length === 0;
 
@@ -82,12 +100,12 @@ export default async function NewAppointmentPage({
               {depts.map((d) => (
                 <Link
                   key={d.id}
-                  href={`/appointments/new?hospital=${hospital.slug}&department=${d.specialty}`}
-                  className={department === d.specialty ? 'fc-chip-on' : 'fc-chip-off'}
+                  href={`/appointments/new?hospital=${hospital.slug}&department=${encodeURIComponent(d.id)}`}
+                  className={selectedDepartment?.id === d.id ? 'fc-chip-on' : 'fc-chip-off'}
                 >
                   {d.name}
-                  {availability.bySpecialty[d.specialty] ? (
-                    <span className="font-bold text-brand-700">{availability.bySpecialty[d.specialty]}</span>
+                  {freeInWindow(d) > 0 ? (
+                    <span className="font-bold text-brand-700">{freeInWindow(d)}</span>
                   ) : (
                     <span className="opacity-50">0</span>
                   )}
@@ -98,7 +116,7 @@ export default async function NewAppointmentPage({
 
           <section className="fc-card p-5">
             <h2 className="text-sm font-bold">
-              Choose a date and time {department && <span className="text-ink-500">· {label(department)}</span>}
+              Choose a date and time {selectedDepartment && <span className="text-ink-500">· {selectedDepartment.name}</span>}
             </h2>
             <p className="mt-0.5 text-[11px] text-ink-500">
               FlowCare session data, computed {formatDateTime(availability.computedAt)}.
@@ -114,7 +132,7 @@ export default async function NewAppointmentPage({
                   endTime: s.endTime,
                   capacity: s.capacity,
                   booked: s.booked,
-                  departmentLabel: label(s.departmentId.split(':dept:')[1] ?? ''),
+                  departmentLabel: depts.find((d) => matchesDepartment(s, d))?.name ?? label(s.departmentId.split(':dept:')[1] ?? ''),
                 }))}
               />
             </div>

@@ -28,8 +28,13 @@ export async function POST(req: NextRequest) {
     const repo = await getRepo();
     if (resource === 'department') {
       if (!actor.permissions.includes('structure:manage')) return fail(403, 'Your hospital permission does not allow department management.');
+      const departmentName = String(body.name ?? '').trim();
+      const existingDepartments = await repo.listOperationalDepartments(actor.hospitalId);
+      if (existingDepartments.some((d) => d.name.trim().toLowerCase() === departmentName.toLowerCase())) {
+        return fail(409, 'A department with that name already exists at this hospital.');
+      }
       const input: NewOperationalDepartment = {
-        hospitalId: actor.hospitalId, name: String(body.name ?? ''), bookingOpen: body.bookingOpen !== false,
+        hospitalId: actor.hospitalId, name: departmentName, bookingOpen: body.bookingOpen !== false,
         consultationCapacity: Number(body.consultationCapacity ?? 4), noShowGraceMinutes: body.noShowGraceMinutes == null ? 30 : Number(body.noShowGraceMinutes),
         approvalResponseWindowMinutes: Number(body.approvalResponseWindowMinutes ?? 240), waitlistEnabled: body.waitlistEnabled !== false,
         recoveryPolicy: (body.recoveryPolicy as NewOperationalDepartment['recoveryPolicy']) ?? 'offer_alternatives',
