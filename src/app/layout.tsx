@@ -17,7 +17,9 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const isHospital = (await headers()).get('x-flowcare-area') === 'hospital';
+  const requestHeaders = await headers();
+  const isHospital = requestHeaders.get('x-flowcare-area') === 'hospital';
+  const isAuth = requestHeaders.get('x-flowcare-shell') === 'auth';
 
   return (
     <html lang="en">
@@ -29,14 +31,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           Skip to content
         </a>
         {/*
-          * The hospital portal brings its own chrome (HospitalShell) and
-          * its sign-in page brings its own (AuthShell). Wrapping either in
-          * the patient header gave staff a navigation they must not use —
-          * Discover, Saved, Care hub — and drew a second FlowCare logo on
-          * the sign-in card. Middleware marks the area because a layout
-          * cannot see the pathname.
+          * Hospital and authentication screens provide their own focused
+          * chrome. They must not inherit the patient product navigation:
+          * Discover, Map, Saved, Care hub, Messages and Compare are useful
+          * after sign-in, but are distracting on a sign-in or recovery door.
+          * Middleware marks these request areas because a root layout cannot
+          * see the pathname directly.
           */}
-        {isHospital ? (
+        {isHospital || isAuth ? (
           <div id="main">{children}</div>
         ) : (
           <AppShell>
