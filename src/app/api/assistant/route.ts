@@ -30,6 +30,8 @@ const Body = z.object({
 const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction|unconscious|can't breathe|cannot breathe|severe bleeding|heart attack|stroke|overdose|suicid(?:e|al)|self[- ]harm)\b/i;
 const EMOTIONAL_SUPPORT_QUERY = /\b(i(?:'m| am)\s+(?:feeling\s+)?(?:sad|depressed|anxious|lonely|hopeless)|feeling\s+(?:sad|low|hopeless|unsafe)|want\s+to\s+die|hurt myself|self[- ]harm)\b/i;
 const EMOTIONAL_SUPPORT_NOTICE = 'If you might hurt yourself or are in immediate danger, call 112 in India or go to the nearest emergency department now. If you are safe right now, FlowCare can help you find a mental-health professional, but it cannot provide crisis counselling.';
+const GENERAL_SCOPE_QUERY = /\b(help|what can you do|how can you help|who are you|what is flowcare|assist me|support me)\b/i;
+const DIRECTORY_QUERY = /\b(hospital|clinic|doctor|specialist|department|appointment|book|booking|slot|availability|near me|nearby|compare|find|psychiatry|mental health)\b/i;
 
 export async function POST(req: NextRequest) {
   try {
@@ -90,6 +92,21 @@ export async function POST(req: NextRequest) {
         understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
         aiUnavailableReason: null,
         safetyNotice: EMOTIONAL_SUPPORT_NOTICE,
+        scopeNotice: SCOPE_NOTICE,
+        locationNotice: null,
+        results: [], total: 0, emptyReason: null, computedAt: new Date().toISOString(),
+      });
+    }
+
+    // Short help/scope questions are not directory searches. Keep this
+    // deterministic so a missing or unavailable provider cannot turn “help”
+    // into the generic no-hospital result.
+    if (GENERAL_SCOPE_QUERY.test(normalizedQuery) && !DIRECTORY_QUERY.test(normalizedQuery)) {
+      return ok({
+        reply: 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.',
+        understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
+        aiUnavailableReason: null,
+        safetyNotice: null,
         scopeNotice: SCOPE_NOTICE,
         locationNotice: null,
         results: [], total: 0, emptyReason: null, computedAt: new Date().toISOString(),
