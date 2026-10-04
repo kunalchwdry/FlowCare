@@ -14,6 +14,7 @@ const NAV = [
   { href: '/assistant', label: 'Assistant', Icon: IconSparkles },
   { href: '/hospitals/saved', label: 'Saved', Icon: IconHeart },
   { href: '/appointments', label: 'Visits', Icon: IconCalendar },
+  { href: '/care-access', label: 'Care access', Icon: IconList },
   { href: '/care', label: 'Care hub', Icon: IconHeart },
 ];
 
@@ -27,6 +28,7 @@ interface Config {
   demoReason: 'forced' | 'unconfigured' | null;
   liveReads?: boolean;
   live?: { hospitals: number; bookable: number } | null;
+  careAccess?: { systemTransitionsConfigured: boolean };
   googleMaps: { serverConfigured: boolean; browserMapKeyPresent: boolean };
   ai: { anyProviderConfigured: boolean };
   demoAccount?: string | null;
@@ -96,7 +98,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-28 pt-4 md:pb-10">{children}</main>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-200 bg-white/95 backdrop-blur md:hidden">
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {NAV.map(({ href, label, Icon }) => (
             <Link
               key={href}
@@ -166,14 +168,14 @@ function DataSourceNotice({ config }: { config: Config }) {
     : 'bg-amber-50 text-amber-900 border-amber-200';
 
   const summary = live
-    ? `Live database${n ? ` · ${n} hospitals` : ''} · appointment slots are generated locally`
+    ? `Live database${n ? ` · ${n} hospitals` : ''} · published slots only`
     : 'Demo data · synthetic records, not real hospitals or real patient feedback';
 
   const detail = live
     ? [
         `${n ? `${n} hospitals` : 'Hospitals'}, services, accessibility notes, arrival packs and support channels are read from the live Supabase project over RLS.`,
-        'Appointment slots are generated locally for the two records the database itself labels [TEST] — the live project has no sessions table — and sign-in uses demo accounts.',
-        'No FlowCare reviews exist yet, so no ratings are shown.',
+        'Published appointment slots are read from the live `slots` table and booking uses the database booking RPC. FlowCare does not invent availability for facilities without a published slot.',
+        'The Care Access exchange uses the live additive Supabase tables. FlowCare reviews are not surfaced in this compatibility mode, so no FlowCare ratings are shown.',
       ]
     : [
         forced
@@ -182,6 +184,9 @@ function DataSourceNotice({ config }: { config: Config }) {
         'They are not real hospitals or real patient feedback.',
       ];
 
+  if (live && config.careAccess && !config.careAccess.systemTransitionsConfigured) {
+    detail.push('Server-only Care Access transitions are disabled until SUPABASE_SERVICE_ROLE_KEY is configured; the app fails closed rather than using a local fallback.');
+  }
   if (!config.googleMaps.serverConfigured) {
     detail.push('Google Maps is not configured, so no Google ratings or photos are shown.');
   }

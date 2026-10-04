@@ -79,6 +79,44 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       },
     });
 
+    /* Keep a linked Care Access journey aligned with the existing appointment
+       state machine. The appointment remains the booking source of truth; the
+       care request records the cross-provider journey and next action. */
+    try {
+      const linked = (await repo.listCareRequests({ hospitalId: actor.hospitalId }))
+        .find((r) => r.appointmentId === appointment.id);
+      if (linked) {
+        const sync = async (action: 'arrive' | 'no_show' | 'cancel' | 'complete' | 'open_follow_up') => {
+          const latest = await repo.getCareRequest(linked.id);
+          if (!latest) return;
+          if (action === 'arrive' && !['BOOKED', 'REMINDER', 'RESCHEDULED'].includes(latest.state)) return;
+          if (action === 'no_show' && !['BOOKED', 'REMINDER', 'RESCHEDULED'].includes(latest.state)) return;
+          if (action === 'cancel' && ['CLOSED', 'CANCELLED', 'NO_SHOW', 'SERVICE_COMPLETED', 'FOLLOW_UP_OPEN'].includes(latest.state)) return;
+          if (action === 'complete' && latest.state !== 'ARRIVED') return;
+          const updated = await repo.transitionCareRequest({
+            careRequestId: latest.id, action, actor: action === 'open_follow_up' ? 'system' : 'hospital',
+            actorId: actor.user.id, actorRole: action === 'open_follow_up' ? 'system' : actor.user.role,
+            expectedVersion: latest.version, reason: action === 'no_show' || action === 'cancel' ? body.reason ?? 'Recorded by hospital staff.' : null,
+            metadata: { hospitalId: actor.hospitalId, appointmentId: appointment.id },
+          });
+          if (action === 'complete' && updated.state === 'SERVICE_COMPLETED') {
+            await repo.createCareTask({ careRequestId: latest.id, episodeId: updated.episodeId, patientId: updated.patientId,
+              hospitalId: actor.hospitalId, ownerType: 'patient', ownerId: updated.patientId, taskType: 'follow_up',
+              title: 'Confirm whether a follow-up appointment is needed', description: 'Administrative follow-up task created after service completion.' });
+            const after = await repo.getCareRequest(latest.id);
+            if (after?.state === 'SERVICE_COMPLETED') await repo.transitionCareRequest({ careRequestId: latest.id, action: 'open_follow_up', actor: 'system', actorId: actor.user.id, actorRole: 'system', expectedVersion: after.version, metadata: { hospitalId: actor.hospitalId, appointmentId: appointment.id, patientId: updated.patientId } });
+          }
+        };
+        if (appointment.status === 'checked_in') await sync('arrive');
+        if (appointment.status === 'no_show') await sync('no_show');
+        if (appointment.status === 'cancelled') await sync('cancel');
+        if (appointment.status === 'completed') await sync('complete');
+      }
+    } catch {
+      /* The appointment transition has already succeeded. A missing or stale
+         care link must not roll it back; the journey remains auditable. */
+    }
+
     const events = await repo.listAppointmentEvents(appointment.id);
     return ok({ appointment, events });
   } catch (e) {

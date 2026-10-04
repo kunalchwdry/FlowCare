@@ -21,6 +21,9 @@ export const HOSPITAL_PERMISSIONS = [
   'reviews:moderate',
   'facts:manage',
   'corrections:review',
+  'structure:manage',
+  'slots:manage',
+  'exports:read',
 ] as const;
 export type HospitalPermission = (typeof HOSPITAL_PERMISSIONS)[number];
 
@@ -33,6 +36,9 @@ export const PERMISSION_LABEL: Record<HospitalPermission, string> = {
   'reviews:moderate': 'Moderate reviews',
   'facts:manage': 'Maintain hospital information',
   'corrections:review': 'Review submitted corrections',
+  'structure:manage': 'Manage departments and providers',
+  'slots:manage': 'Manage slot supply and capacity',
+  'exports:read': 'Export minimum-necessary operational data',
 };
 
 /**

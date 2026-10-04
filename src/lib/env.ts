@@ -39,7 +39,8 @@ export const env = {
    * Read the facility record from the live Supabase project with the
    * publishable key (RLS still applies), while appointment slots, reviews
    * and sign-in continue to come from the local demo store. Used because the
-   * project has real hospitals but no sessions table and no reviews.
+   * project has real hospitals and published slots, while review reads remain
+   * intentionally disabled until the live review vocabulary is mapped.
    */
   liveReadsEnabled: () => s(process.env.FLOWCARE_LIVE_READS) === 'true',
 } as const;

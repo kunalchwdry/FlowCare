@@ -159,9 +159,9 @@ npm run db:seed          # load 60 real Pune hospitals from OpenStreetMap
 
 ```bash
 npm run typecheck
-npm test                                                  # 223 offline
-FLOWCARE_TEST_BASE_URL=http://127.0.0.1:3000 npm test     # ← with a server up
-npm run test:live                                         # 61 against real Supabase
+npm test                                                  # 388 with a server up
+FLOWCARE_TEST_BASE_URL=http://127.0.0.1:3000 npm test     # explicit HTTP target
+npm run test:live                                         # requires live-db credentials and test users
 ```
 
 > Run the offline suite **with a server running**, or the two HTTP suites skip
@@ -403,24 +403,31 @@ does not have, and the product does not pretend otherwise.
 
 ### Running against the live database
 
-`FLOWCARE_LIVE_READS=true` reads the facility record - hospitals, departments,
+`FLOWCARE_LIVE_READS=true` reads the facility record — hospitals, departments,
 service verifications, accessibility components, arrival packs and support
-channels - from the live Supabase project using the **publishable (anon) key**,
-so every read still passes through RLS and nothing is written. On the
-reference project that is **62 real Pune hospitals**, 57 service verifications
-and 11 arrival packs.
+channels — from the live Supabase project using the **publishable (anon) key**,
+so every public read still passes through RLS. It also reads published slots
+from the live `slots` table and books through the database's guarded booking
+RPC. On the configured reference project, the observed snapshot is **64
+published hospitals**, **2 rows marked booking-integrated**, **57 service
+verifications**, **11 arrival packs**, and **26 slot rows**; these counts are
+operational observations, not product guarantees.
 
-It is deliberately a *partial* mode, and the UI says so in a banner on every
-page: the project has **no sessions table** and an **empty `hospital_reviews`**,
-so appointment slots are generated locally for the two rows the database
-itself labels `[TEST]`, sign-in still uses demo accounts, and no ratings are
-shown. Slots are never attached to one of the 60 real facilities - offering a
-fabricated slot at a real hospital is the worst thing this product could do.
+It remains a deliberately *partial* compatibility mode, and the UI says so in
+a banner on every page: FlowCare reviews are not surfaced until their live
+column vocabulary is mapped, so no FlowCare ratings are shown. Care Access
+requests, options, transitions, tasks and capacity signals use the additive
+Supabase exchange tables and are durable when the deployment also configures
+`SUPABASE_SERVICE_ROLE_KEY` for server-only system transitions. Without that
+server key, public facility discovery still works but system-generated Care
+Access actions fail closed rather than falling back to a local store.
 
-`src/lib/data/liveRepo.ts` implements this. It exists because
-`supabaseRepo.ts` was written against a reconstructed column vocabulary
-(`address_line`, `hospital_departments`, `clinic_sessions`) that does not
-match the real schema (`address`, `departments`, no sessions table at all).
+`src/lib/data/liveRepo.ts` implements this split. It exists because the
+original discovery portion of `supabaseRepo.ts` used a reconstructed column
+vocabulary (`address_line`, `hospital_departments`, `clinic_sessions`) that
+does not match the linked project's actual schema (`address`, `departments`,
+`slots`). The full adapter now reuses the verified live mapper for discovery
+while its Care Access methods use the additive RPC/table schema.
 
 ### Booking: requesting a slot
 
@@ -454,7 +461,7 @@ means.
 
 ## 7. Data model
 
-**40 tables, RLS enabled on all 40, 38 policies, 8 migrations.**
+**Configured reference snapshot: 50 public tables, RLS enabled on all 50, 48 public policies, and 20 applied migrations.** These are schema observations, not a promise that every deployment has the same history.
 
 ```
 Core          hospitals · departments · slots · appointments · visits
@@ -661,9 +668,9 @@ flowcare/
 │   ├── ai/                  provider adapters, intent schema, fallback
 │   ├── reviews/             eligibility, aggregation, moderation
 │   └── data/                repository port: demoRepo | supabaseRepo
-├── supabase/migrations/     0001 … 0008, additive and idempotent
+├── supabase/migrations/     0001 … 0021, additive and idempotent
 ├── scripts/db/              migrate · backup · seed-osm · client
-├── tests/                   8 offline suites + 3 live suites
+├── tests/                   22 offline/API suites + live-db checks
 ├── docs/
 │   ├── architecture.md · database.md · security.md · api.md · testing.md
 │   └── research/            01–08 + sources.md (73 graded sources)
@@ -679,37 +686,39 @@ This section distinguishes five different things that are often collapsed into
 
 | Claim | Status |
 |---|---|
-| **Implemented locally** | ✅ All routes, features and migrations |
-| **Tested locally** | ✅ 284 tests, 0 skipped; typecheck and production build clean |
-| **Externally configured** | ✅ Live Supabase project; 7 migrations applied; 62 hospitals seeded |
+| **Implemented locally** | ✅ Adaptive booking/recovery, supply management, exports, adapter changes and migrations through `0021` |
+| **Tested locally** | ✅ 316 offline tests passed; typecheck and production build clean |
+| **Externally configured** | ✅ Configured Supabase project; 21 migrations applied; 64 published hospitals observed |
 | **Externally verified** | ⚠️ **Partial** — see below |
-| **Production-ready** | ❌ **No** |
+| **Production-ready** | ❌ **Not claimed** — deployment checks remain |
 
-**Verified against real external systems:**
+**Verified against the configured Supabase project:**
 
-- ✅ Database schema, RLS policies, RPCs, delegation boundaries — 61 live tests
-  against real Supabase with real users.
+- ✅ Migrations `0001`–`0021` are recorded in the remote migration ledger; `0021_adaptive_queue_operations` is applied.
+- ✅ Full-repository public facility reads work with `FLOWCARE_LIVE_READS=false`;
+  live search and directory return HTTP 200 instead of the former schema-mismatch
+  500s.
+- ✅ Live facility mode returns 64 published hospitals and 2
+  booking-integrated records in the current snapshot.
+- ✅ A rollback-only database smoke journey exercised request creation,
+  system screening/offer, option selection, referral, hospital acknowledgement,
+  acceptance, slot offer, live `book_appointment`, and Care Access booking.
+- ✅ The normal authenticated RPC rejects a patient attempting the system-only
+  `screen` action; system transitions are restricted to the service-role RPC.
 
-**Not verified:**
+**Not exercised here:**
 
-- ❌ **The app is not yet running against the live database.** The UI is pinned
-  to `FLOWCARE_DEMO_MODE=true` because `supabaseRepo.ts` still makes 36
-  `.from(…)` table writes and 0 `.rpc(…)` calls, against column names that do
-  not match the real schema. **This is the single largest remaining task.**
+- ⚠️ Authenticated HTTP Care Access against the live app: the configured
+  workspace has no service-role value, so the app reports a 503 for
+  server-generated system actions and fails closed rather than falling back to
+  local storage. Configure `SUPABASE_SERVICE_ROLE_KEY` before production use.
 - ❌ Google Places/Routes — no billable key has been exercised.
 - ❌ AI providers — no provider key has been exercised against a live endpoint.
-  The BYOK plumbing is tested (encryption, storage, isolation, the "Test key"
-  round trip), but no real Gemini/OpenAI/Groq key has been run through it.
-- ❌ The agentic booking flow is tested at the database boundary (proposals,
-  confirmation, expiry, idempotency, cross-user denial). The full
-  browser journey has **not** been driven end to end against a live hospital.
-- ❌ Service-role paths — no service-role key exists for this project.
+- ❌ A browser-driven live authenticated journey, load test, accessibility
+  audit, or legal review of the §14.3 discrepancy-fingerprint question.
 
-**It is not production-ready**, and the UI working is not evidence that it is.
-Outstanding before that claim could be made: the repository port, a real Google
-key under quota, at least one AI provider exercised end to end, a load test, an
-accessibility audit, and a legal read on the §14.3 discrepancy-fingerprint
-question.
+The demo path remains deterministic and fully testable; live claims above are
+limited to the exact reads and rollback checks listed.
 
 ---
 
@@ -717,14 +726,12 @@ question.
 
 1. **Discovery data is Pune-only** — 60 hospitals from OSM, of which only 2
    test hospitals are bookable. Everything else is discovery-only by design.
-2. **Nothing confirms a slot request.** A patient can request a slot and see
-   it tracked as `requested`; there is **no hospital-side screen that accepts
-   or declines it**, and no notification when the status changes. The wording
-   in the UI is honest about this, but the loop is half-built: the staff
-   confirmation step and `requestAppointment` against the live Supabase schema
-   (which must go through a SECURITY DEFINER function, not a client insert)
-   are both unported — the Supabase implementation throws rather than
-   pretending to succeed.
+2. **Adaptive recovery is an MVP, not an automation service.** Instant,
+   approval-required and waitlist modes now use database-backed slots and queue
+   entries. Approval expiry is processed by the Vercel Cron endpoint, so a
+   deployment must set `CRON_SECRET` and `SUPABASE_SERVICE_ROLE_KEY`; if the
+   cron is not configured, no status is silently fabricated and operators must
+   run the recovery endpoint through an authorized scheduler.
 3. **Several features ship dark**: cross-source discrepancy detection (F16)
    awaits a legal read; travel times await a Routes key; wayfinding routes
    await a facility willing to author one.
@@ -800,16 +807,14 @@ accepting a proposed time (the API exists and is tested; the UI does not).
 
 ### Known limitations
 
-- **`supabaseRepo` cannot transition appointments.** It throws
-  `NOT_IMPLEMENTED_SUPABASE_TRANSITION`. The live project has a
-  `transition_appointment` RPC, but its accepted action vocabulary has never
-  been read back from the database and guessing it would mean writing the
-  wrong status silently. Production runs `liveRepo`, which does work.
-- **`supabaseRepo` also has the wrong schema.** It filters `hospitals` on an
-  `active` column; the live table has `published`. Turning off
-  `FLOWCARE_LIVE_READS` empties the hospital list.
-- **Appointment slots are generated**, not read from the live `slots` table.
-  The banner says so on every page.
+- **The live compatibility mode is intentionally split.** Discovery maps the
+  linked project's `published`/`departments`/`slots` vocabulary, while the
+  additive Care Access adapter uses the new exchange tables and RPCs. Review
+  reads remain disabled until their live column vocabulary is mapped.
+- **Care Access system transitions require the server-only service key.**
+  `SUPABASE_SERVICE_ROLE_KEY` is intentionally blank in this workspace. The
+  API reports a clear 503 and never falls back to a local Care Access store;
+  direct database rollback smoke tests cover the service-role RPC path.
 - **Notifications are in-app only.** No mail or SMS provider is configured
   and nothing claims otherwise.
 - **Rate limiting counts in process memory**, so on serverless it is per
@@ -817,8 +822,11 @@ accepting a proposed time (the API exists and is tested; the UI does not).
 - **Demo accounts are refused** on a production build with a real Supabase
   project unless `FLOWCARE_ALLOW_DEMO_AUTH=true`. The test harness sets it.
 
-### Not production ready
+### Validation boundary
 
-Externally verified: database, RLS, RPCs, live reads, the appointment loop
-on the demo repository. Not verified: live Supabase writes, Google Places,
-and any AI provider — no key has been exercised against a real provider here.
+Verified against the configured project: migrations through `0020`, RLS and
+Care Access RPC authorization, the rollback journey from request through
+booking, the full-repository public facility reads, and the live slot booking
+RPC. Not exercised here: authenticated HTTP Care Access with a service-role
+key (the configured key is absent), Google Places, or an AI provider key.
+Those are explicit deployment checks rather than evidence to invent.

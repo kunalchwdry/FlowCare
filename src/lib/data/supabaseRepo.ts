@@ -1,20 +1,30 @@
 /**
  * Supabase implementation of the discovery Repo.
  *
- * STATUS: implemented against the schema in supabase/migrations, but NOT
- * executed against a live project in this environment (no project is
- * configured here). See docs/testing.md -> "Blocked / externally dependent".
+ * The Care Access portion is implemented against the additive schema in
+ * supabase/migrations and has been exercised against the configured project.
+ * Discovery methods use the linked project's verified legacy vocabulary via
+ * liveRepo; this avoids silently selecting reconstructed columns.
  *
- * Every read goes through the RLS-scoped request client. Only moderation and
- * audit writes use the service-role client, and only after the route handler
- * has already verified the caller's admin role.
+ * Every ordinary read goes through the RLS-scoped request client. Only system
+ * Care Access transitions and explicitly administrative writes use the
+ * service-role client, and only after the route handler has verified the
+ * caller's role.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type {
+  CareAccessMetrics, CareAccessOption, CareAccessRequest, CareAccessTransitionInput, CareEpisode,
+  CareStateTransition, CareTask, CapacitySignal, NewCareAccessRequest, NewCareTask,
+  QueueEntry,
+} from '@/lib/careAccess/types';
+import type { NewOperationalDepartment, NewOperationalService, NewOperationalSlot, NewProvider, NewProviderSchedule, OperationalDepartment, OperationalService, OperationalSlot, Provider, ProviderSchedule, QueueListFilters } from '@/lib/operations/types';
 import type {
   AuditEvent, CorrectionReview, FacilityFacts, NewCareContext, NewCorrection,
   NewFollowUpTask, NewReport, NewReview, NewVisitRecord, Repo,
 } from './repo';
 import { assertAdministrative } from '@/lib/journey/prep';
+import { liveRepo } from './liveRepo';
+import { fromDbStatus, idempotencyKey } from '@/lib/appointments/dbVocabulary';
 import type {
   AccessibilityComponent, Appointment, ArrivalPack, CareContext, ClinicSession,
   FacilityCharge, FacilityCorrection, Favorite, FollowUpTask, Hospital,
@@ -73,6 +83,91 @@ function mapCorrection(r: Row): FacilityCorrection {
     reviewedByUserId: r.reviewed_by_user_id ?? null, reviewedAt: r.reviewed_at ?? null,
     outcome: r.outcome ?? null, createdAt: r.created_at,
   };
+}
+
+function mapCareRequest(r: Row): CareAccessRequest {
+  return {
+    id: r.id, patientId: r.patient_id, patientPhone: r.patient_phone ?? null, specialty: r.specialty ?? null,
+    serviceType: r.service_type, location: r.location ?? null,
+    preferredStartDate: r.preferred_start_date ?? null, preferredEndDate: r.preferred_end_date ?? null,
+    preferredTimeRange: r.preferred_time_range ?? null, budgetConstraint: r.budget_constraint ?? null,
+    accessibilityRequirements: r.accessibility_requirements ?? [], languagePreference: r.language_preference ?? [],
+    coverage: r.coverage ?? null, referralRequired: r.referral_required ?? null, state: r.state,
+    slotType: r.slot_type ?? null, queueId: r.queue_id ?? null, queuePosition: r.queue_position ?? null,
+    approvalDeadline: r.approval_deadline ?? null, approvalResponseWindowMinutes: r.approval_response_window_minutes ?? null,
+    recoveryPolicy: r.recovery_policy ?? null, selectedHospitalId: r.selected_hospital_id ?? null, selectedOptionId: r.selected_option_id ?? null,
+    appointmentId: r.appointment_id ?? null, episodeId: r.episode_id ?? null, version: r.version ?? 1,
+    createdAt: r.created_at, updatedAt: r.updated_at, closedAt: r.closed_at ?? null,
+  };
+}
+
+function mapCareOption(r: Row): CareAccessOption {
+  return {
+    id: r.id, careRequestId: r.care_request_id, hospitalId: r.hospital_id,
+    hospitalName: r.hospital_name ?? 'Hospital', departmentId: r.department_id ?? null,
+    departmentName: r.department_name ?? null, providerId: r.provider_id ?? null, providerName: r.provider_name ?? null,
+    serviceSlug: r.service_slug ?? null, sessionId: r.session_id ?? null, slotType: r.slot_type ?? null,
+    approvalRequired: r.approval_required == null ? undefined : Boolean(r.approval_required), waitlistEnabled: r.waitlist_enabled == null ? undefined : Boolean(r.waitlist_enabled),
+    approvalDeadline: r.approval_deadline ?? null, slotLabel: r.slot_label ?? null, distanceKm: r.distance_km == null ? null : Number(r.distance_km),
+    queueWaitMinutes: r.queue_wait_minutes ?? null, queueObservedAt: r.queue_observed_at ?? null,
+    costBand: r.cost_band ?? null, costVerifiedAt: r.cost_verified_at ?? null,
+    accessibility: r.accessibility ?? [], languages: r.languages ?? [], capabilityMatched: Boolean(r.capability_matched),
+    eligible: Boolean(r.eligible), freshness: r.freshness, freshnessLabel: r.freshness_label,
+    reasons: Array.isArray(r.reasons) ? r.reasons : [], status: r.status,
+    offeredAt: r.offered_at, expiresAt: r.expires_at ?? null, selectedAt: r.selected_at ?? null,
+  };
+}
+
+function mapCareEpisode(r: Row): CareEpisode {
+  return { id: r.id, careRequestId: r.care_request_id, patientId: r.patient_id, hospitalId: r.hospital_id ?? null,
+    appointmentId: r.appointment_id ?? null, followUpRequired: Boolean(r.follow_up_required),
+    followUpCompleted: Boolean(r.follow_up_completed), createdAt: r.created_at, closedAt: r.closed_at ?? null };
+}
+
+function mapCareTask(r: Row): CareTask {
+  return { id: r.id, careRequestId: r.care_request_id, episodeId: r.episode_id ?? null, patientId: r.patient_id,
+    hospitalId: r.hospital_id ?? null, ownerType: r.owner_type, ownerId: r.owner_id ?? null, taskType: r.task_type,
+    title: r.title, description: r.description ?? null, status: r.status, deadline: r.deadline ?? null,
+    resolution: r.resolution ?? null, createdAt: r.created_at, updatedAt: r.updated_at, completedAt: r.completed_at ?? null };
+}
+
+function mapCapacitySignal(r: Row): CapacitySignal {
+  return { id: r.id, hospitalId: r.hospital_id, serviceSlug: r.service_slug ?? null,
+    available: r.available ?? null, queueWaitMinutes: r.queue_wait_minutes ?? null, waitingCount: r.waiting_count ?? null,
+    note: r.note ?? null, source: r.source, updatedAt: r.updated_at, expiresAt: r.expires_at ?? null };
+}
+
+function mapOperationalDepartment(r: Row): OperationalDepartment {
+  return { id: r.id, hospitalId: r.hospital_id, name: r.name, bookingOpen: Boolean(r.booking_open),
+    consultationCapacity: Number(r.consultation_capacity), noShowGraceMinutes: r.no_show_grace_minutes ?? null,
+    approvalResponseWindowMinutes: Number(r.approval_response_window_minutes ?? 240), waitlistEnabled: Boolean(r.waitlist_enabled ?? true),
+    recoveryPolicy: r.recovery_policy ?? 'offer_alternatives', queueOrderRule: r.queue_order_rule ?? 'arrival_order' };
+}
+function mapOperationalService(r: Row): OperationalService {
+  return { id: r.id, hospitalId: r.departments?.hospital_id ?? r.hospital_id, departmentId: r.department_id, serviceSlug: r.service_slug, label: r.label, active: Boolean(r.active), source: r.source ?? 'hospital_configured' };
+}
+function mapProvider(r: Row): Provider {
+  return { id: r.id, hospitalId: r.hospital_id, departmentId: r.department_id, name: r.name,
+    specialty: r.specialty ?? null, qualification: r.qualification ?? null, active: Boolean(r.active) };
+}
+function mapProviderSchedule(r: Row): ProviderSchedule {
+  return { id: r.id, providerId: r.provider_id, weekday: Number(r.weekday), startsAt: r.starts_at,
+    endsAt: r.ends_at, timezone: r.timezone, active: Boolean(r.active) };
+}
+function mapOperationalSlot(r: Row): OperationalSlot {
+  const booked = Number(r.booked ?? 0);
+  return { id: r.id, hospitalId: r.hospital_id ?? r.departments?.hospital_id, departmentId: r.department_id,
+    providerId: r.provider_id ?? null, serviceSlug: r.service_slug ?? null, startsAt: r.starts_at, endsAt: r.ends_at,
+    kind: r.kind, capacity: Number(r.capacity), booked, bookingOpen: Boolean(r.booking_open), slotType: r.slot_type ?? 'approval_required',
+    waitlistEnabled: Boolean(r.waitlist_enabled), approvalResponseWindowMinutes: Number(r.approval_response_window_minutes ?? 240),
+    recoveryPolicy: r.recovery_policy ?? 'offer_alternatives', expiresAt: r.expires_at ?? null,
+    updatedAt: r.updated_at ?? r.starts_at, source: 'database' };
+}
+function mapQueueEntry(r: Row): QueueEntry {
+  return { id: r.id, queueId: r.queue_id, careRequestId: r.care_request_id ?? null, appointmentId: r.appointment_id ?? null,
+    patientId: r.patient_id, hospitalId: r.hospital_id, departmentId: r.department_id, providerId: r.provider_id ?? null,
+    slotId: r.slot_id ?? null, queueType: r.queue_type, status: r.status, position: r.position ?? null,
+    estimatedSlotAt: r.estimated_slot_at ?? null, lastUpdatedAt: r.last_updated_at, createdAt: r.created_at };
 }
 
 const PROVENANCE_COLS = 'source, source_url, verified_at, verified_by_role';
@@ -162,31 +257,18 @@ export function createSupabaseRepo(
   return {
     kind: 'supabase',
 
-    /**
-     * Not wired yet.
-     *
-     * The live project already has `transition_appointment` as a SECURITY
-     * DEFINER RPC, but its accepted action vocabulary has not been read back
-     * from the database, and guessing it would mean silently writing the
-     * wrong status. Throwing here is deliberate: the portal must not appear
-     * to work on a path that has never been verified.
-     *
-     * getRepo() returns liveRepo whenever FLOWCARE_LIVE_READS is set, which
-     * is the configuration in production, so this path is not currently
-     * reached. See docs/hospital-portal.md for what mapping it to the RPC
-     * requires.
-     */
-    async transitionAppointment() {
-      throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
+    /** The linked project owns appointment state; reuse its verified RPC adapter. */
+    async transitionAppointment(input) {
+      return liveRepo.transitionAppointment(input);
     },
-      async listAppointmentEvents() {
-      throw new Error('NOT_IMPLEMENTED_SUPABASE_TRANSITION');
+    async listAppointmentEvents(appointmentId) {
+      return liveRepo.listAppointmentEvents(appointmentId);
     },
-    async listAppointmentMessages() {
-      return [];
+    async listAppointmentMessages(appointmentId) {
+      return liveRepo.listAppointmentMessages(appointmentId);
     },
-    async sendAppointmentMessage() {
-      throw new Error('NOT_IMPLEMENTED_SUPABASE_MESSAGES');
+    async sendAppointmentMessage(input) {
+      return liveRepo.sendAppointmentMessage(input);
     },
     async listNotifications() {
       return [];
@@ -195,38 +277,309 @@ export function createSupabaseRepo(
       /* no notifications table in the live project yet — migration 0009 */
     },
 
+    /* --------------------------------------------- care access exchange */
+    async listCareRequests({ patientId, hospitalId }) {
+      let q = client.from('care_requests').select('*').order('updated_at', { ascending: false });
+      if (patientId) q = q.eq('patient_id', patientId);
+      if (hospitalId) q = q.eq('selected_hospital_id', hospitalId);
+      return must<Row[]>(await q).map(mapCareRequest);
+    },
 
+    async getCareRequest(id) {
+      const res = await client.from('care_requests').select('*').eq('id', id).maybeSingle();
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return res.data ? mapCareRequest(res.data) : null;
+    },
+
+    async createCareRequest(input: NewCareAccessRequest) {
+      const res = await client.rpc('create_care_request', {
+        p_specialty: input.specialty ?? null, p_service_type: input.serviceType,
+        p_location: input.location ?? null, p_start: input.preferredStartDate ?? null,
+        p_end: input.preferredEndDate ?? null, p_time_range: input.preferredTimeRange ?? null,
+        p_budget: input.budgetConstraint ?? null, p_accessibility: input.accessibilityRequirements ?? [],
+        p_languages: input.languagePreference ?? [], p_coverage: input.coverage ?? null,
+        p_referral_required: input.referralRequired ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapCareRequest(res.data as Row);
+    },
+
+    async listCareOptions(careRequestId) {
+      const res = await client.from('care_access_options')
+        .select('*, hospitals(name), departments(name)')
+        .eq('care_request_id', careRequestId).order('eligible', { ascending: false });
+      return must<Row[]>(res).map((r) => mapCareOption({
+        ...r, hospital_name: r.hospitals?.name, department_name: r.departments?.name,
+      }));
+    },
+
+    async saveCareOptions(careRequestId, options) {
+      const res = await client.rpc('save_care_access_options', {
+        p_request: careRequestId,
+        p_options: options.map((o) => ({
+          hospital_id: o.hospitalId, department_id: o.departmentId, session_id: o.sessionId,
+          provider_id: o.providerId, service_slug: o.serviceSlug, slot_type: o.slotType,
+          approval_required: o.approvalRequired, waitlist_enabled: o.waitlistEnabled, approval_deadline: o.approvalDeadline,
+          distance_km: o.distanceKm, queue_wait_minutes: o.queueWaitMinutes, queue_observed_at: o.queueObservedAt,
+          cost_band: o.costBand, cost_verified_at: o.costVerifiedAt, accessibility: o.accessibility,
+          languages: o.languages, capability_matched: o.capabilityMatched, eligible: o.eligible,
+          freshness: o.freshness, freshness_label: o.freshnessLabel, reasons: o.reasons,
+          status: o.status, offered_at: o.offeredAt, expires_at: o.expiresAt,
+        })),
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return (Array.isArray(res.data) ? res.data : [res.data]).filter(Boolean).map((r: Row) => mapCareOption(r));
+    },
+
+    async transitionCareRequest(input) {
+      if (input.actor === 'system') {
+        if (!adminClient) throw new Error('CARE_ACCESS_SYSTEM_ACTION_UNAVAILABLE');
+        let patientId = typeof input.metadata?.patientId === 'string' ? input.metadata.patientId : null;
+        if (!patientId) patientId = (await this.getCareRequest(input.careRequestId))?.patientId ?? null;
+        if (!patientId) throw new Error('NOT_FOUND');
+        const system = await adminClient.rpc('transition_care_request_system', {
+          p_id: input.careRequestId, p_actor: patientId, p_action: input.action,
+          p_option: input.optionId ?? null, p_appointment: input.appointmentId ?? null,
+          p_reason: input.reason ?? null, p_metadata: input.metadata ?? {},
+          p_expected_version: input.expectedVersion ?? null,
+        });
+        if (system.error) throw new Error(`supabase: ${system.error.message}`);
+        return mapCareRequest(system.data as Row);
+      }
+      const res = await client.rpc('transition_care_request', {
+        p_id: input.careRequestId, p_action: input.action, p_option: input.optionId ?? null,
+        p_appointment: input.appointmentId ?? null, p_reason: input.reason ?? null,
+        p_metadata: input.metadata ?? {}, p_expected_version: input.expectedVersion ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapCareRequest(res.data as Row);
+    },
+
+    async listCareTransitions(careRequestId) {
+      const res = await client.from('care_state_transitions').select('*')
+        .eq('care_request_id', careRequestId).order('created_at', { ascending: true });
+      return must<Row[]>(res).map((r): CareStateTransition => ({
+        id: String(r.id), careRequestId: r.care_request_id, previousState: r.previous_state ?? null,
+        newState: r.new_state, action: r.action, actorId: r.actor_id ?? null, actorRole: r.actor_role,
+        reason: r.reason ?? null, metadata: r.metadata ?? {}, createdAt: r.created_at,
+      }));
+    },
+
+    async listCareEpisodes({ patientId, hospitalId }) {
+      let q = client.from('care_episodes').select('*').order('created_at', { ascending: false });
+      if (patientId) q = q.eq('patient_id', patientId);
+      if (hospitalId) q = q.eq('hospital_id', hospitalId);
+      return must<Row[]>(await q).map(mapCareEpisode);
+    },
+
+    async listCareTasks({ patientId, hospitalId, careRequestId }) {
+      let q = client.from('care_tasks').select('*').order('updated_at', { ascending: false });
+      if (patientId) q = q.eq('patient_id', patientId);
+      if (hospitalId) q = q.eq('hospital_id', hospitalId);
+      if (careRequestId) q = q.eq('care_request_id', careRequestId);
+      return must<Row[]>(await q).map(mapCareTask);
+    },
+
+    async createCareTask(input: NewCareTask) {
+      const res = await client.rpc('create_care_task', {
+        p_request: input.careRequestId, p_episode: input.episodeId ?? null, p_patient: input.patientId,
+        p_hospital: input.hospitalId ?? null, p_owner_type: input.ownerType, p_owner: input.ownerId ?? null,
+        p_task_type: input.taskType, p_title: input.title, p_description: input.description ?? null,
+        p_deadline: input.deadline ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapCareTask(res.data as Row);
+    },
+
+    async updateCareTask(id, _actorId, status, resolution = null) {
+      const res = await client.rpc('update_care_task', { p_id: id, p_status: status, p_resolution: resolution ?? null });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapCareTask(res.data as Row);
+    },
+
+    async listCapacitySignals(hospitalIds) {
+      let q = client.from('hospital_capacity_signals').select('*').order('updated_at', { ascending: false });
+      if (hospitalIds?.length) q = q.in('hospital_id', hospitalIds);
+      return must<Row[]>(await q).map(mapCapacitySignal);
+    },
+
+    async publishCapacitySignal(input) {
+      const res = await client.rpc('publish_capacity_signal', {
+        p_hospital: input.hospitalId, p_service: input.serviceSlug ?? null, p_available: input.available ?? null,
+        p_wait: input.queueWaitMinutes ?? null, p_waiting: input.waitingCount ?? null,
+        p_note: input.note ?? null, p_expires: input.expiresAt ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapCapacitySignal(res.data as Row);
+    },
+
+    async getCareAccessMetrics(hospitalId) {
+      const source = hospitalId ? client : (adminClient ?? client);
+      let requestQuery = source.from('care_requests').select('*').order('updated_at', { ascending: false });
+      if (hospitalId) requestQuery = requestQuery.eq('selected_hospital_id', hospitalId);
+      const requestRows = must<Row[]>(await requestQuery);
+      const requests = requestRows.map(mapCareRequest);
+      const signals = await this.listCapacitySignals(hospitalId ? [hospitalId] : undefined);
+      const closed = requests.filter((r) => r.state === 'CLOSED').length;
+      return {
+        total: requests.length, closed, closureRate: requests.length ? Math.round((closed / requests.length) * 100) : null,
+        averageAcknowledgementMinutes: null, averageBookingMinutes: null,
+        unresolved: requests.filter((r) => !['CLOSED', 'CANCELLED', 'NO_SHOW'].includes(r.state)).length,
+        staleCapacitySignals: signals.filter((s) => s.expiresAt && new Date(s.expiresAt) <= new Date()).length,
+        cancellations: requests.filter((r) => r.state === 'CANCELLED').length,
+        noShows: requests.filter((r) => r.state === 'NO_SHOW').length,
+        followUpsOpen: requests.filter((r) => r.state === 'FOLLOW_UP_OPEN').length,
+        pendingApprovals: requests.filter((r) => r.state === 'APPROVAL_PENDING').length,
+        approvalExpired: requests.filter((r) => r.state === 'APPROVAL_EXPIRED').length,
+        waitlisted: requests.filter((r) => r.state === 'WAITLISTED').length,
+        recoveryRequired: requests.filter((r) => ['RECOVERY_REQUIRED','RECOVERY_OPTIONS_AVAILABLE'].includes(r.state)).length,
+      } satisfies CareAccessMetrics;
+    },
+
+    async listOperationalDepartments(hospitalId) {
+      let q = client.from('departments').select('*').order('name');
+      if (hospitalId) q = q.eq('hospital_id', hospitalId);
+      return must<Row[]>(await q).map(mapOperationalDepartment);
+    },
+
+    async createOperationalDepartment(input: NewOperationalDepartment) {
+      const res = await client.rpc('create_operational_department', {
+        p_hospital: input.hospitalId, p_name: input.name, p_booking_open: input.bookingOpen ?? true,
+        p_consultation_capacity: input.consultationCapacity ?? 4, p_no_show_grace_minutes: input.noShowGraceMinutes ?? 30,
+        p_approval_response_window_minutes: input.approvalResponseWindowMinutes ?? 240,
+        p_waitlist_enabled: input.waitlistEnabled ?? true, p_recovery_policy: input.recoveryPolicy ?? 'offer_alternatives',
+        p_queue_order_rule: input.queueOrderRule ?? 'arrival_order',
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapOperationalDepartment(res.data as Row);
+    },
+
+    async listOperationalServices(hospitalId) {
+      let q = client.from('department_services').select('*, departments(hospital_id)').order('label');
+      if (hospitalId) {
+        const departments = await this.listOperationalDepartments(hospitalId);
+        if (!departments.length) return [];
+        q = q.in('department_id', departments.map((d) => d.id));
+      }
+      return must<Row[]>(await q).map(mapOperationalService);
+    },
+
+    async createOperationalService(input: NewOperationalService) {
+      const dept = await client.from('departments').select('hospital_id').eq('id', input.departmentId).maybeSingle();
+      if (dept.error || !dept.data) throw new Error('NOT_FOUND');
+      const res = await client.rpc('create_department_service', { p_department: input.departmentId, p_service_slug: input.serviceSlug, p_label: input.label, p_active: input.active ?? true });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapOperationalService({ ...(res.data as Row), hospital_id: dept.data.hospital_id });
+    },
+
+    async listProviders(hospitalId) {
+      let q = client.from('providers').select('*').order('name');
+      if (hospitalId) q = q.eq('hospital_id', hospitalId);
+      return must<Row[]>(await q).map(mapProvider);
+    },
+
+    async createProvider(input: NewProvider) {
+      const res = await client.rpc('create_provider', {
+        p_hospital: input.hospitalId, p_department: input.departmentId, p_name: input.name,
+        p_specialty: input.specialty ?? null, p_qualification: input.qualification ?? null, p_active: input.active ?? true,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapProvider(res.data as Row);
+    },
+
+    async listProviderSchedules(providerId) {
+      let q = client.from('provider_schedules').select('*').order('weekday');
+      if (providerId) q = q.eq('provider_id', providerId);
+      return must<Row[]>(await q).map(mapProviderSchedule);
+    },
+
+    async createProviderSchedule(input: NewProviderSchedule) {
+      const res = await client.rpc('create_provider_schedule', {
+        p_provider: input.providerId, p_weekday: input.weekday, p_starts: input.startsAt, p_ends: input.endsAt,
+        p_timezone: input.timezone ?? 'Asia/Kolkata', p_active: input.active ?? true,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapProviderSchedule(res.data as Row);
+    },
+
+    async listOperationalSlots(hospitalId) {
+      let q = client.from('slots').select('*, departments(hospital_id)').order('starts_at');
+      if (hospitalId) {
+        const departments = await this.listOperationalDepartments(hospitalId);
+        if (!departments.length) return [];
+        q = q.in('department_id', departments.map((d) => d.id));
+      }
+      const rows = must<Row[]>(await q);
+      const ids = rows.map((r) => r.id);
+      const booked = new Map<string, number>();
+      if (ids.length) {
+        const appointments = must<Row[]>(await client.from('appointments').select('slot_id,status').in('slot_id', ids));
+        for (const a of appointments) if (!['cancelled','denied','no_show'].includes(a.status)) booked.set(a.slot_id, (booked.get(a.slot_id) ?? 0) + 1);
+      }
+      return rows.map((r) => mapOperationalSlot({ ...r, booked: booked.get(r.id) ?? 0 }));
+    },
+
+    async createOperationalSlot(input: NewOperationalSlot) {
+      const res = await client.rpc('create_operational_slot', {
+        p_department: input.departmentId, p_starts: input.startsAt, p_ends: input.endsAt, p_capacity: input.capacity,
+        p_slot_type: input.slotType, p_provider: input.providerId ?? null, p_service_slug: input.serviceSlug ?? null,
+        p_kind: input.kind ?? 'appointment', p_booking_open: input.bookingOpen ?? true,
+        p_waitlist_enabled: input.waitlistEnabled ?? input.slotType === 'waitlist',
+        p_approval_response_window_minutes: input.approvalResponseWindowMinutes ?? 240,
+        p_recovery_policy: input.recoveryPolicy ?? 'offer_alternatives', p_expires_at: input.expiresAt ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      const row = mapOperationalSlot(res.data as Row);
+      const dept = await client.from('departments').select('hospital_id').eq('id', row.departmentId).maybeSingle();
+      return mapOperationalSlot({ ...(res.data as Row), hospital_id: dept.data?.hospital_id, booked: 0 });
+    },
+
+    async updateOperationalSlot(id, patch) {
+      const res = await client.rpc('update_operational_slot', {
+        p_id: id, p_booking_open: patch.bookingOpen ?? null, p_capacity: patch.capacity ?? null,
+        p_slot_type: patch.slotType ?? null, p_waitlist_enabled: patch.waitlistEnabled ?? null,
+        p_approval_response_window_minutes: patch.approvalResponseWindowMinutes ?? null,
+        p_recovery_policy: patch.recoveryPolicy ?? null, p_expires_at: patch.expiresAt ?? null,
+      });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return mapOperationalSlot(res.data as Row);
+    },
+
+    async listQueueEntries(filters: QueueListFilters = {}) {
+      let q = client.from('queue_entries').select('*').order('last_updated_at', { ascending: false });
+      if (filters.hospitalId) q = q.eq('hospital_id', filters.hospitalId);
+      if (filters.departmentId) q = q.eq('department_id', filters.departmentId);
+      if (filters.status) q = q.eq('status', filters.status);
+      const rows = must<Row[]>(await q);
+      return { entries: rows.map(mapQueueEntry), source: 'database' as const, updatedAt: new Date().toISOString(), staleAfterMinutes: 5 };
+    },
+
+    async expireDueCareRequests() {
+      if (!adminClient) throw new Error('CARE_ACCESS_SYSTEM_ACTION_UNAVAILABLE');
+      const res = await adminClient.rpc('expire_due_approvals');
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
+      return Number(res.data ?? 0);
+    },
+
+    // The linked project uses the pre-MVP facility vocabulary (`published`,
+    // `address`, `lat`, `departments`, `slots`), not the reconstructed
+    // `active`/`hospital_departments`/`clinic_sessions` vocabulary that this
+    // adapter originally selected. Reuse the verified live facility mapper
+    // so a full Supabase request does not turn a public directory into 500.
     async listHospitals() {
-      const res = await client.from('hospitals').select(HOSPITAL_SELECT).eq('active', true);
-      return must<Row[]>(res).map(mapHospital);
+      return liveRepo.listHospitals();
     },
 
     async getHospital(idOrSlug) {
-      const res = await client.from('hospitals').select(HOSPITAL_SELECT).or(`id.eq.${idOrSlug},slug.eq.${idOrSlug}`).limit(1);
-      const rows = must<Row[]>(res);
-      return rows[0] ? mapHospital(rows[0]) : null;
+      return liveRepo.getHospital(idOrSlug);
     },
 
     async listSessions(hospitalIds) {
-      let q = client.from('clinic_sessions')
-        .select('id, hospital_id, department_id, session_date, start_time, end_time, capacity, booked, status')
-        .gte('session_date', new Date().toISOString().slice(0, 10));
-      if (hospitalIds?.length) q = q.in('hospital_id', hospitalIds);
-      return must<Row[]>(await q).map((r): ClinicSession => ({
-        id: r.id, hospitalId: r.hospital_id, departmentId: r.department_id,
-        date: r.session_date, startTime: r.start_time, endTime: r.end_time,
-        capacity: r.capacity, booked: r.booked, status: r.status,
-      }));
+      return liveRepo.listSessions(hospitalIds);
     },
 
-    async listQueues(hospitalIds) {
-      let q = client.from('hospital_queue_snapshots')
-        .select('hospital_id, published, waiting_count, median_wait_minutes, observed_at');
-      if (hospitalIds?.length) q = q.in('hospital_id', hospitalIds);
-      return must<Row[]>(await q).map((r): QueueSnapshot => ({
-        hospitalId: r.hospital_id, published: r.published, waitingCount: r.waiting_count,
-        medianWaitMinutes: r.median_wait_minutes, observedAt: r.observed_at,
-      }));
+    async listQueues() {
+      return [];
     },
 
     async listReviews(opts) {
@@ -236,41 +589,45 @@ export function createSupabaseRepo(
       return must<Row[]>(await q).map(mapReview);
     },
 
-    async listAppointments({ patientId, hospitalId }) {
-      let q = client.from('appointments').select('id, hospital_id, patient_id, department_id, session_id, scheduled_for, status, completed_at');
-      if (patientId) q = q.eq('patient_id', patientId);
-      if (hospitalId) q = q.eq('hospital_id', hospitalId);
-      return must<Row[]>(await q).map((r): Appointment => ({
-        id: r.id, hospitalId: r.hospital_id, patientId: r.patient_id,
-        departmentId: r.department_id, sessionId: r.session_id,
-        scheduledFor: r.scheduled_for, status: r.status, completedAt: r.completed_at,
-      }));
+    async listAppointments(args) {
+      return liveRepo.listAppointments(args);
     },
 
     async getAppointment(id: string) {
-      const res = await client
-        .from('appointments')
-        .select('id, hospital_id, patient_id, department_id, session_id, scheduled_for, status, completed_at')
-        .eq('id', id)
-        .maybeSingle();
-      if (res.error) throw new Error(`supabase: ${res.error.message}`);
-      const r = res.data as Row | null;
-      if (!r) return null;
-      return {
-        id: r.id, hospitalId: r.hospital_id, patientId: r.patient_id,
-        departmentId: r.department_id, sessionId: r.session_id,
-        scheduledFor: r.scheduled_for, status: r.status, completedAt: r.completed_at,
-      } as Appointment;
+      return liveRepo.getAppointment(id);
     },
 
-    /**
-     * Not ported. Against the live schema a slot request must go through the
-     * SECURITY DEFINER booking function so capacity, versioning, idempotency
-     * and audit stay in the database — never a client-side insert. Failing
-     * loudly is correct: a silent no-op would look like a successful booking.
-     */
-    async requestAppointment(): Promise<Appointment> {
-      throw new Error('supabase: requestAppointment is not ported to the live schema yet');
+    /** Book against the live `slots` table through its SECURITY DEFINER RPC. */
+    async requestAppointment(input): Promise<Appointment> {
+      const { data: auth } = await client.auth.getUser();
+      if (!auth?.user) throw new Error('AUTH_REQUIRED');
+      const name =
+        (auth.user.user_metadata?.full_name as string | undefined)?.trim() ||
+        auth.user.email || 'Patient';
+      const res = await client.rpc('book_appointment', {
+        p_slot: input.sessionId,
+        p_name: name.slice(0, 120),
+        p_key: idempotencyKey(['book', input.sessionId, auth.user.id]),
+      });
+      if (res.error) {
+        const message = String(res.error.message ?? 'BOOKING_FAILED');
+        for (const code of ['NOT_FOUND', 'BOOKING_CLOSED', 'CAPACITY_FULL', 'AUTH_REQUIRED'] as const) {
+          if (message.includes(code)) throw new Error(code);
+        }
+        throw new Error('BOOKING_FAILED');
+      }
+      const row = (Array.isArray(res.data) ? res.data[0] : res.data) as Row;
+      if (!row?.id) throw new Error('BOOKING_FAILED');
+      const slot = await client.from('slots').select('starts_at').eq('id', row.slot_id ?? input.sessionId).maybeSingle();
+      if (slot.error) throw new Error(`supabase: ${slot.error.message}`);
+      return {
+        id: String(row.id), hospitalId: String(row.hospital_id), patientId: String(row.patient_id),
+        patientName: row.patient_name ?? name, departmentId: String(row.department_id),
+        sessionId: String(row.slot_id ?? input.sessionId), scheduledFor: String(slot.data?.starts_at ?? row.created_at),
+        status: fromDbStatus(String(row.status)), completedAt: row.status === 'completed' ? String(row.created_at) : null,
+        reason: input.reason ?? null, requestedAt: String(row.created_at), queueId: row.queue_id ?? null,
+        slotType: row.slot_type ?? null, approvalDeadline: row.approval_deadline ?? null, approvalStatus: row.approval_status ?? 'not_required', version: Number(row.version ?? 1),
+      };
     },
 
     async createReview(input: NewReview) {
@@ -378,87 +735,77 @@ export function createSupabaseRepo(
     },
 
     async recordAuditEvent(e: AuditEvent) {
-      const c = adminClient ?? client;
-      await c.from('audit_events').insert({
-        actor_id: e.actorId, actor_role: e.actorRole, action: e.action,
-        entity: e.entity, entity_id: e.entityId, metadata: e.metadata,
+      const res = await client.rpc('record_audit_event', {
+        p_actor_role: e.actorRole, p_action: e.action, p_entity: e.entity,
+        p_entity_id: e.entityId, p_metadata: e.metadata,
       });
+      if (res.error) throw new Error(`supabase: ${res.error.message}`);
     },
 
     /* ================================================ journey layer ==== */
 
     async getFacilityFacts(hospitalId: string): Promise<FacilityFacts> {
-      // Eight small reads in parallel beats one wide join: each fact table
-      // has its own RLS policy and its own freshness index.
+      // Map the actual linked-project vocabulary. In particular, do not turn
+      // an unverified/self-reported service into a hospital-confirmed claim.
       const [sv, sl, ch, ac, ls, ap, rt, pr] = await Promise.all([
-        client.from('hospital_service_verifications')
-          .select(`hospital_id, service_slug, method, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_scheme_listings')
-          .select(`hospital_id, scheme_code, scheme_name, listing_status, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_charges')
-          .select(`hospital_id, charge_type, amount_min, amount_max, currency, is_published_range, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_accessibility_components')
-          .select(`hospital_id, component_code, status, standard_reference, note, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_language_support')
-          .select(`hospital_id, stage, languages, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_arrival_packs')
-          .select(`hospital_id, gate_label, gate_note, first_counter, building_note, parking_note, dropoff_note, late_policy_text, arrival_guidance_text, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId).limit(1),
-        client.from('hospital_wayfinding_routes')
-          .select(`hospital_id, from_point, to_point, locale, steps, step_free, walking_minutes, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
-        client.from('hospital_prep_requirements')
-          .select(`hospital_id, department_id, code, text, applies_to, ${PROVENANCE_COLS}`).eq('hospital_id', hospitalId),
+        client.from('hospital_service_verifications').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_scheme_listings').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_charges').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_accessibility_components').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_language_support').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_arrival_packs').select('*').eq('hospital_id', hospitalId).limit(1),
+        client.from('hospital_wayfinding_routes').select('*').eq('hospital_id', hospitalId),
+        client.from('hospital_prep_requirements').select('*').eq('hospital_id', hospitalId),
       ]);
-
       const packRow = must<Row[]>(ap)[0];
 
       return {
         hospitalId,
         serviceVerifications: must<Row[]>(sv).map((r): ServiceVerification => ({
-          hospitalId: r.hospital_id, serviceSlug: r.service_slug, method: r.method,
+          hospitalId: r.hospital_id, serviceSlug: r.service_slug,
+          method: r.verification === 'hospital_confirmed' ? 'hospital_confirmed' : 'user_reported_pending',
           provenance: mapProvenance(r),
         })),
         schemeListings: must<Row[]>(sl).map((r): SchemeListing => ({
-          hospitalId: r.hospital_id, schemeCode: r.scheme_code, schemeName: r.scheme_name,
-          listingStatus: r.listing_status, provenance: mapProvenance(r),
-        })),
-        charges: must<Row[]>(ch).map((r): FacilityCharge => ({
-          hospitalId: r.hospital_id, chargeType: r.charge_type,
-          amountMin: Number(r.amount_min), amountMax: Number(r.amount_max),
-          currency: r.currency, isPublishedRange: Boolean(r.is_published_range),
+          hospitalId: r.hospital_id, schemeCode: r.scheme_code,
+          schemeName: r.scheme_name ?? r.scheme_code,
+          listingStatus: r.listing === 'listed' ? 'listed' : 'unknown',
           provenance: mapProvenance(r),
         })),
+        charges: must<Row[]>(ch)
+          .filter((r) => r.amount_inr != null)
+          .map((r): FacilityCharge => ({
+            hospitalId: r.hospital_id, chargeType: r.charge_type,
+            amountMin: Number(r.amount_inr), amountMax: Number(r.amount_inr),
+            currency: r.currency === 'INR' ? 'INR' : 'INR', isPublishedRange: true,
+            provenance: mapProvenance(r),
+          })),
         accessibilityComponents: must<Row[]>(ac).map((r): AccessibilityComponent => ({
-          hospitalId: r.hospital_id, componentCode: r.component_code, status: r.status,
-          standardReference: r.standard_reference ?? null, note: r.note ?? null,
-          provenance: mapProvenance(r),
+          hospitalId: r.hospital_id, componentCode: r.component,
+          status: r.status === 'present' ? 'present_below_standard' : 'not_assessed',
+          standardReference: null, note: r.note ?? null, provenance: mapProvenance(r),
         })),
         languageSupport: must<Row[]>(ls).map((r): LanguageSupport => ({
-          hospitalId: r.hospital_id, stage: r.stage, languages: r.languages ?? [],
-          provenance: mapProvenance(r),
+          hospitalId: r.hospital_id, stage: r.support ?? 'facility',
+          languages: r.language_code ? [r.language_code] : [], provenance: mapProvenance(r),
         })),
-        arrivalPack: packRow
-          ? ({
-              hospitalId: packRow.hospital_id,
-              gateLabel: packRow.gate_label ?? null,
-              gateNote: packRow.gate_note ?? null,
-              firstCounter: packRow.first_counter ?? null,
-              buildingNote: packRow.building_note ?? null,
-              parkingNote: packRow.parking_note ?? null,
-              dropoffNote: packRow.dropoff_note ?? null,
-              latePolicyText: packRow.late_policy_text ?? null,
-              arrivalGuidanceText: packRow.arrival_guidance_text ?? null,
-              provenance: mapProvenance(packRow),
-            } as ArrivalPack)
-          : null,
+        arrivalPack: packRow ? ({
+          hospitalId: packRow.hospital_id,
+          gateLabel: null, gateNote: packRow.entrance_note ?? null,
+          firstCounter: packRow.registration_note ?? null,
+          buildingNote: packRow.opd_timing_note ?? null,
+          parkingNote: null, dropoffNote: null, latePolicyText: null,
+          arrivalGuidanceText: packRow.what_to_bring ?? null,
+          provenance: mapProvenance(packRow),
+        } as ArrivalPack) : null,
         routes: must<Row[]>(rt).map((r): WayfindingRoute => ({
           hospitalId: r.hospital_id, fromPoint: r.from_point, toPoint: r.to_point,
-          locale: r.locale, steps: r.steps ?? [], stepFree: r.step_free ?? null,
-          walkingMinutes: r.walking_minutes ?? null, provenance: mapProvenance(r),
+          locale: 'en-IN', steps: Array.isArray(r.steps) ? r.steps : [],
+          stepFree: r.step_free ?? null, walkingMinutes: null, provenance: mapProvenance(r),
         })),
         prepRequirements: must<Row[]>(pr).map((r): PrepRequirement => ({
-          hospitalId: r.hospital_id, departmentId: r.department_id ?? null,
-          code: r.code, text: r.text, appliesTo: r.applies_to,
-          provenance: mapProvenance(r),
+          hospitalId: r.hospital_id, departmentId: null, code: r.prep_code,
+          text: r.detail, appliesTo: 'all', provenance: mapProvenance(r),
         })),
       };
     },

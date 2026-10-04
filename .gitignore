@@ -40,3 +40,5 @@ deck/preview/
 deck/.build/
 .vercel
 .env*
+
+supabase/.temp/
