@@ -18,6 +18,7 @@ interface ConversationMessage { role: 'user' | 'assistant'; content: string }
 type SpeechResult = { 0: { transcript: string } };
 type SpeechResultList = { length: number; [index: number]: SpeechResult };
 type SpeechEvent = Event & { results: SpeechResultList };
+type SpeechErrorEvent = Event & { error?: string };
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -26,7 +27,7 @@ type SpeechRecognitionLike = {
   stop: () => void;
   onresult: ((event: SpeechEvent) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: SpeechErrorEvent) => void) | null;
 };
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
@@ -79,7 +80,7 @@ function ChatBubble({ role, children }: { role: ConversationMessage['role']; chi
         <div
           className={user
             ? 'rounded-2xl rounded-br-md bg-brand-600 px-4 py-3 text-sm leading-relaxed text-white shadow-sm'
-            : 'rounded-2xl rounded-bl-md border border-ink-200 bg-white px-4 py-3 text-sm leading-relaxed text-ink-800 shadow-sm'}
+            : 'rounded-2xl rounded-bl-md bg-white px-1 py-2 text-sm leading-relaxed text-ink-800'}
         >
           {children}
         </div>
@@ -142,12 +143,33 @@ export default function AssistantPage() {
     };
   }, []);
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) return;
+    if (!Recognition) {
+      setError('Voice input is not supported in this browser. Use Chrome or Edge, or type your request instead.');
+      return;
+    }
     if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
+      return;
+    }
+
+    // Ask for microphone permission explicitly before SpeechRecognition starts.
+    // This produces a useful browser permission prompt instead of the vague
+    // "something went wrong" error shown by Chromium in some sessions.
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError('This browser cannot access a microphone. Open FlowCare in Chrome or Edge over HTTPS.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch (permissionError) {
+      const name = permissionError instanceof DOMException ? permissionError.name : '';
+      setError(name === 'NotAllowedError' || name === 'PermissionDeniedError'
+        ? 'Microphone access is blocked. Click the lock icon beside the address bar, set Microphone to Allow, then refresh FlowCare.'
+        : 'FlowCare could not access the microphone. Check that a microphone is connected and try again.');
       return;
     }
 
@@ -164,15 +186,26 @@ export default function AssistantPage() {
       setIsListening(false);
       recognitionRef.current = null;
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
       setIsListening(false);
       recognitionRef.current = null;
-      setError('Voice input could not start. Check your microphone permission or type your request instead.');
+      const message = event.error === 'not-allowed'
+        ? 'Microphone access is blocked. Click the lock icon beside the address bar, set Microphone to Allow, then refresh FlowCare.'
+        : event.error === 'no-speech'
+          ? 'I did not hear anything. Please try again and speak after the Listening indicator appears.'
+          : 'Voice input could not start. Check your microphone permission or type your request instead.';
+      setError(message);
     };
     recognitionRef.current = recognition;
     setError(null);
     setIsListening(true);
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setError('Voice input is already starting. Wait a moment and try again.');
+    }
   };
 
   const speak = (text: string) => {
@@ -250,9 +283,9 @@ export default function AssistantPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 py-2">
-      <section className="overflow-hidden rounded-3xl border border-ink-200 bg-white shadow-sm">
-        <header className="flex items-center gap-3 border-b border-ink-200 bg-white px-4 py-4 sm:px-6">
+    <div className="mx-auto flex min-h-[calc(100vh-9rem)] max-w-4xl flex-col gap-4 py-2 sm:gap-5">
+      <section className="flex min-h-[calc(100vh-10rem)] flex-col overflow-hidden rounded-3xl border border-ink-200 bg-white shadow-sm">
+        <header className="flex items-center gap-3 border-b border-ink-200 bg-white px-4 py-3.5 sm:px-6">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-violet-100 text-violet-700">
             <IconSparkles width={20} height={20} />
           </span>
@@ -272,8 +305,8 @@ export default function AssistantPage() {
           </div>
         </header>
 
-        <div className="bg-ink-50/70 px-3 py-4 sm:px-6 sm:py-6">
-          <div className="mx-auto min-h-[320px] max-w-3xl space-y-4 rounded-2xl bg-ink-100/70 p-3 sm:min-h-[380px] sm:p-5">
+        <div className="flex-1 bg-white px-3 py-5 sm:px-6 sm:py-8">
+          <div className="mx-auto min-h-[380px] max-w-3xl space-y-5 bg-white p-1 sm:min-h-[440px] sm:p-3">
             <ChatBubble role="assistant">
               <p className="font-semibold text-ink-950">Hi, I&apos;m FlowCare&apos;s hospital assistant.</p>
               <p className="mt-1 text-sm text-ink-600">
@@ -320,8 +353,13 @@ export default function AssistantPage() {
             )}
 
             {error && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-                {error}
+              <div role="alert" className="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+                <span className="flex-1">{error}</span>
+                {(error.includes('Microphone') || error.includes('microphone')) && (
+                  <button type="button" onClick={() => { setError(null); void toggleListening(); }} className="rounded-xl bg-white px-3 py-2 text-[11px] font-bold text-rose-800 ring-1 ring-rose-200 hover:bg-rose-100">
+                    Try microphone again
+                  </button>
+                )}
               </div>
             )}
             <div ref={threadEndRef} />
