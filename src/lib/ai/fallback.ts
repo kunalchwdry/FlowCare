@@ -70,7 +70,7 @@ const LANGUAGE_PATTERNS: Array<[RegExp, string]> = [
 
 /** Phrases that mean "this person may need urgent care" — never triage, just signpost. */
 const EMERGENCY_PATTERNS =
-  /\b(emergency|ambulance now|right now|severe|unconscious|bleeding heavily|can'?t breathe|cannot breathe|heart attack|stroke|chest pain|suicide|self[- ]harm|overdose|accident|snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction)\b/i;
+  /\b(emergency|ambulance now|right now|severe|unconscious|bleeding heavily|can'?t breathe|cannot breathe|heart attack|cardiac attack|cardiac arrest|cardiac emergency|stroke|chest pain|suicide|self[- ]harm|overdose|accident|snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction)\b/i;
 
 export interface FallbackParse {
   filters: AiFilters;
