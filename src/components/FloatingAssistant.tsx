@@ -42,6 +42,34 @@ const WELCOME: ChatMessage = {
   content: 'Hi! I can help you find and compare hospitals, departments, accessibility options, and available appointments.',
 };
 
+function speechChunks(text: string, maxLength = 180): string[] {
+  const sentences = text.match(/[^.!?।]+[.!?।]?/g)?.map((part) => part.trim()).filter(Boolean) ?? [text];
+  const chunks: string[] = [];
+  let current = '';
+  for (const sentence of sentences) {
+    if (sentence.length > maxLength) {
+      const words = sentence.split(/\s+/);
+      for (const word of words) {
+        if (current && `${current} ${word}`.length > maxLength) {
+          chunks.push(current);
+          current = word;
+        } else {
+          current = current ? `${current} ${word}` : word;
+        }
+      }
+      continue;
+    }
+    if (current && `${current} ${sentence}`.length > maxLength) {
+      chunks.push(current);
+      current = sentence;
+    } else {
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : [text];
+}
+
 /**
  * FlowCare's single assistant entry point. Gemini handles the healthcare
  * search intent on /api/chat; the browser only provides optional microphone
@@ -57,6 +85,8 @@ export function FloatingAssistant() {
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+  const speechRunRef = useRef(0);
 
   const hindi = language === 'hi';
 
@@ -64,19 +94,58 @@ export function FloatingAssistant() {
     if (open) endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, open, busy]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return undefined;
+    const loadVoices = () => { voicesRef.current = window.speechSynthesis.getVoices(); };
+    loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+  }, []);
+
   useEffect(() => () => {
     recognitionRef.current?.stop();
+    speechRunRef.current += 1;
     if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
   }, []);
 
+  function stopSpeaking() {
+    speechRunRef.current += 1;
+    if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
+  }
+
+  function pickVoice(lang: VoiceLanguage): SpeechSynthesisVoice | undefined {
+    const voices = voicesRef.current;
+    const preferred = lang === 'hi'
+      ? ['hi-IN', 'hi', 'en-IN']
+      : ['en-IN', 'en-GB', 'en-US', 'en'];
+    return preferred.reduce<SpeechSynthesisVoice | undefined>((selected, wanted) =>
+      selected ?? voices.find((voice) => voice.lang.toLowerCase() === wanted.toLowerCase())
+      ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(`${wanted.toLowerCase()}-`)), undefined);
+  }
+
   function speak(text: string, lang = language) {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang === 'hi' ? 'hi-IN' : 'en-IN';
-    utterance.rate = 0.96;
-    utterance.pitch = 1;
-    window.speechSynthesis.speak(utterance);
+    if (typeof window === 'undefined' || !window.speechSynthesis || !text.trim()) return;
+    stopSpeaking();
+    const run = speechRunRef.current;
+    const chunks = speechChunks(text);
+    const voice = pickVoice(lang);
+    let index = 0;
+
+    const playNext = () => {
+      if (run !== speechRunRef.current || index >= chunks.length) return;
+      const utterance = new SpeechSynthesisUtterance(chunks[index++]);
+      utterance.lang = voice?.lang ?? (lang === 'hi' ? 'hi-IN' : 'en-IN');
+      if (voice) utterance.voice = voice;
+      utterance.rate = 0.88;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      utterance.onend = () => window.setTimeout(playNext, 60);
+      utterance.onerror = (event) => {
+        if (event.error !== 'canceled' && event.error !== 'interrupted') window.setTimeout(playNext, 80);
+      };
+      window.speechSynthesis.speak(utterance);
+    };
+    playNext();
   }
 
   async function sendMessage(content: string) {
@@ -168,7 +237,7 @@ export function FloatingAssistant() {
   }
 
   function reset() {
-    window.speechSynthesis?.cancel();
+    stopSpeaking();
     stopListening();
     setMessages([WELCOME]);
     setDraft('');
@@ -176,8 +245,15 @@ export function FloatingAssistant() {
   }
 
   function toggleLanguage() {
+    stopSpeaking();
     setLanguage((current) => current === 'en' ? 'hi' : 'en');
     setError(null);
+  }
+
+  function closeAssistant() {
+    stopSpeaking();
+    stopListening();
+    setOpen(false);
   }
 
   return (
@@ -199,7 +275,7 @@ export function FloatingAssistant() {
               <button type="button" onClick={toggleLanguage} className="rounded-xl border border-ink-200 px-2.5 py-1.5 text-[11px] font-semibold text-ink-700 hover:bg-ink-50">
                 {hindi ? 'Switch language' : 'भाषा बदलें'}
               </button>
-              <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-ink-100" aria-label="Close FlowCare assistant">
+              <button type="button" onClick={closeAssistant} className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-ink-100" aria-label="Close FlowCare assistant">
                 <IconClose width={18} height={18} />
               </button>
             </div>
@@ -252,7 +328,7 @@ export function FloatingAssistant() {
         </section>
       )}
 
-      <button type="button" onClick={() => setOpen((current) => !current)} className="pointer-events-auto ml-auto grid h-16 w-16 place-items-center rounded-2xl bg-brand-500 text-white shadow-xl shadow-brand-500/25 ring-4 ring-white transition hover:-translate-y-0.5 hover:bg-brand-600 focus:outline-none focus:ring-brand-200" aria-label={open ? 'Close FlowCare assistant' : 'Open FlowCare live voice assistant'} aria-expanded={open}>
+      <button type="button" onClick={() => open ? closeAssistant() : setOpen(true)} className="pointer-events-auto ml-auto grid h-16 w-16 place-items-center rounded-2xl bg-brand-500 text-white shadow-xl shadow-brand-500/25 ring-4 ring-white transition hover:-translate-y-0.5 hover:bg-brand-600 focus:outline-none focus:ring-brand-200" aria-label={open ? 'Close FlowCare assistant' : 'Open FlowCare live voice assistant'} aria-expanded={open}>
         {open ? <IconClose width={25} height={25} /> : <FlowCareMark size={31} title="FlowCare live voice assistant" />}
       </button>
     </div>
