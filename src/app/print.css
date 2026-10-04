@@ -1,0 +1,21 @@
+/* Print-only layout for the offline visit card. App chrome is hidden by
+   print:hidden classes; these rules keep the actual card compact and avoid a
+   mostly-empty second sheet. */
+@media print {
+  @page { size: A4 portrait; margin: 8mm; }
+
+  html, body { background: #fff !important; }
+  .visit-card-print { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+  .visit-card-sheet { border-radius: 0 !important; box-shadow: none !important; page-break-inside: avoid; }
+  .visit-card-hero { padding: 14px 18px !important; }
+  .visit-card-hero h2 { margin-top: 10px !important; font-size: 22px !important; }
+  .visit-card-hero .mt-6 { margin-top: 10px !important; }
+  .visit-card-content { padding: 14px !important; }
+  .visit-card-content > section { margin-top: 10px !important; padding: 10px !important; }
+  .visit-card-content > section:first-child { margin-top: 0 !important; }
+  .visit-card-content p, .visit-card-content li { font-size: 9.5px !important; line-height: 1.25 !important; }
+  .visit-card-content h3 { font-size: 14px !important; }
+  .visit-card-content .mt-3, .visit-card-content .mt-4 { margin-top: 6px !important; }
+  .visit-card-content .mt-5 { margin-top: 8px !important; }
+  .visit-card-content footer { margin-top: 8px !important; padding-top: 6px !important; }
+}

@@ -33,7 +33,6 @@ const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?
 const EMOTIONAL_SUPPORT_QUERY = /\b(i(?:'m| am)\s+(?:feeling\s+)?(?:sad|depressed|anxious|lonely|hopeless)|feeling\s+(?:sad|low|hopeless|unsafe)|want\s+to\s+die|hurt myself|self[- ]harm)\b/i;
 const EMOTIONAL_SUPPORT_NOTICE = 'If you might hurt yourself or are in immediate danger, call 112 in India or go to the nearest emergency department now. If you are safe right now, FlowCare can help you find a mental-health professional, but it cannot provide crisis counselling.';
 const ConversationalReplySchema = z.object({ reply: z.string().trim().min(1).max(700) }).strict();
-const GENERAL_SCOPE_QUERY = /\b(help|what can you do|how can you help|who are you|what is flowcare|what do (?:you|i) need|what do you want|what do you know about me|what(?:'s| is) my name|who am i|assist me|support me)\b/i;
 const DIRECTORY_QUERY = /\b(hospital|clinic|doctor|specialist|department|appointment|book|booking|slot|availability|near me|nearby|compare|find|psychiatry|mental health)\b/i;
 
 async function generateConversationalReply(
@@ -41,22 +40,43 @@ async function generateConversationalReply(
   query: string,
   history: Array<{ role: 'user' | 'assistant'; content: string }>,
   language: 'en' | 'hi',
-): Promise<string | null> {
-  if (!provider) return null;
+): Promise<{ reply: string | null; error: string | null }> {
+  if (!provider) return { reply: null, error: 'provider_not_configured' };
   try {
     const context = history.slice(-6).map((turn) => `${turn.role}: ${turn.content.slice(0, 500)}`).join('\\n');
     const raw = await provider.completeJson({
-      system: `${FLOWCARE_SYSTEM_PROMPT}\\n\\nThis is a short conversational reply, not a hospital search. Answer the user's question helpfully within FlowCare's real scope. If they ask what FlowCare needs, explain that a care need and city or area are useful, while location access is optional. If they ask for their name or personal data, say you only know what they share in this chat. Do not diagnose or give treatment advice. Keep the reply under 100 words. Respond in ${language === 'hi' ? 'Hindi' : 'English'}. Return only JSON in the form {"reply":"..."}.`,
+      system: `${FLOWCARE_SYSTEM_PROMPT}\\n\\nThis is a short conversational reply, not a hospital search. Answer ordinary questions helpfully, including questions about a person, word, place, or general topic such as "What is Mansoor?" If the question is ambiguous, ask one concise clarification. If they ask what FlowCare needs, explain that a care need and city or area are useful, while location access is optional. If they ask for their name or personal data, say you only know what they share in this chat. Do not diagnose or give treatment advice. Keep the reply under 100 words. Respond in ${language === 'hi' ? 'Hindi' : 'English'}. Return only JSON in the form {"reply":"..."}.`,
       user: `${context ? `Recent context:\\n${context}\\n\\n` : ''}Latest user message:\\n${query}`,
       timeoutMs: env.aiTimeoutMs(),
       maxOutputTokens: 220,
     });
-    const parsed = ConversationalReplySchema.safeParse(JSON.parse(raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()));
-    return parsed.success ? parsed.data.reply : null;
-  } catch {
-    // The deterministic scope response remains the safe fallback if Gemini
-    // is unavailable or returns an unexpected shape.
-    return null;
+    const cleaned = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+    try {
+      const parsed = ConversationalReplySchema.safeParse(JSON.parse(cleaned));
+      if (parsed.success) return { reply: parsed.data.reply, error: null };
+    } catch {
+      // Some Groq models may answer in plain text despite JSON mode. The
+      // conversational route can safely use that bounded text; directory
+      // extraction remains strict JSON-only below.
+    }
+    const objectText = cleaned.match(/\{[\s\S]*\}/)?.[0];
+    if (objectText) {
+      try {
+        const parsed = ConversationalReplySchema.safeParse(JSON.parse(objectText));
+        if (parsed.success) return { reply: parsed.data.reply, error: null };
+      } catch {
+        // Continue to the bounded plain-text fallback.
+      }
+    }
+    return {
+      reply: cleaned.length > 0 && cleaned.length <= 700 ? cleaned : null,
+      error: cleaned.length > 0 && cleaned.length <= 700 ? null : 'provider_bad_shape',
+    };
+  } catch (error) {
+    // The deterministic scope response remains the safe fallback if Groq is
+    // unavailable or returns an unexpected shape. Keep only a bounded error
+    // code for diagnostics; never return provider credentials or prompts.
+    return { reply: null, error: error instanceof Error ? error.message.slice(0, 240) : 'provider_error' };
   }
 }
 
@@ -131,12 +151,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // General questions use Gemini for the conversational reply. The fixed
-    // fallback keeps the bubble useful if Gemini is unavailable; directory
-    // replies below remain data-derived so the model cannot invent hospitals.
-    if (GENERAL_SCOPE_QUERY.test(normalizedQuery) && !DIRECTORY_QUERY.test(normalizedQuery)) {
-      const conversationalProvider = getProvider('gemini');
-      const aiReply = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
+    // Non-directory questions use Groq for a conversational answer. This
+    // lets the assistant answer ordinary questions instead of treating every
+    // unknown phrase as a hospital search. Directory replies below remain
+    // data-derived so the model cannot invent hospitals.
+    if (!DIRECTORY_QUERY.test(normalizedQuery)) {
+      const conversationalProvider = getProvider();
+      const conversational = await generateConversationalReply(conversationalProvider, body.query, body.history, body.language);
+      const aiReply = conversational.reply;
       const fallbackReply = body.language === 'hi'
         ? 'मैं अस्पताल, विभाग, पहुंच संबंधी सुविधाएं और उपलब्ध अपॉइंटमेंट खोजने और तुलना करने में मदद कर सकता हूँ। अपनी जरूरत और स्थान बताएं, जैसे: “पुणे के पास कार्डियोलॉजी अस्पताल खोजें।” मैं निदान या इलाज की सलाह नहीं दे सकता।'
         : 'I can help you find and compare hospitals, departments, accessibility options, and available appointments. Tell me what kind of care you need and where, for example: “Find a cardiology hospital near Pune.” I cannot diagnose or provide treatment advice.';
@@ -150,7 +172,7 @@ export async function POST(req: NextRequest) {
           model: aiReply ? conversationalProvider?.model() ?? null : null,
           latencyMs: null,
         },
-        aiUnavailableReason: null,
+        aiUnavailableReason: conversational.error,
         safetyNotice: null,
         scopeNotice: SCOPE_NOTICE,
         locationNotice: null,
@@ -194,7 +216,7 @@ export async function POST(req: NextRequest) {
 
     // One application-owned provider. The browser cannot select a vendor or
     // supply a credential; changing providers later is a server-only change.
-    const provider = getProvider('gemini');
+    const provider = getProvider();
 
     const intent = await extractIntent(body.query, {
       provider,

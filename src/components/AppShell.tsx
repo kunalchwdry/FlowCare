@@ -49,7 +49,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col">
       {config && <DataSourceNotice config={config} />}
 
-      <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-ink-200 bg-white/90 backdrop-blur print:hidden">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
           <FlowCareLogo size="sm" href="/" className="shrink-0" />
 
@@ -95,9 +95,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-28 pt-4 md:pb-10">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-28 pt-4 md:pb-10 print:pb-0 print:pt-0">{children}</main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-200 bg-white/95 backdrop-blur md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-ink-200 bg-white/95 backdrop-blur md:hidden print:hidden">
         <div className="grid grid-cols-6">
           {NAV.map(({ href, label, Icon }) => (
             <Link
@@ -117,7 +117,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <FloatingAssistant />
 
-      <footer className="hidden border-t border-ink-200 bg-white px-4 py-6 md:block">
+      <footer className="hidden border-t border-ink-200 bg-white px-4 py-6 md:block print:hidden">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 text-xs text-ink-500">
           <span className="font-semibold text-ink-700">FlowCare</span>
           <span>Outpatient discovery &amp; appointments</span>
@@ -197,7 +197,7 @@ function DataSourceNotice({ config }: { config: Config }) {
   }
 
   return (
-    <div className={`border-b px-4 text-[12px] ${tone}`}>
+    <div className={`border-b px-4 text-[12px] print:hidden ${tone}`}>
       <div className="mx-auto flex max-w-7xl items-center gap-2 py-1.5">
         <span className="truncate font-medium">{summary}</span>
         <button
