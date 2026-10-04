@@ -39,10 +39,10 @@ export const MODEL_CHOICES: Record<string, string[]> = {
   gemini: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
   groq: [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it',
   ],
   nvidia: ['meta/llama-3.3-70b-instruct', 'meta/llama-3.1-8b-instruct', 'mistralai/mixtral-8x7b-instruct-v0.1'],
   openrouter: [
@@ -217,7 +217,7 @@ export const PROVIDERS: LlmProvider[] = [
     id: 'groq', label: 'Groq', note: 'Low-latency OpenAI-compatible endpoint',
     baseUrl: 'https://api.groq.com/openai/v1',
     keyEnv: () => s(process.env.GROQ_API_KEY),
-    modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'llama-3.3-70b-versatile',
+    modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'openai/gpt-oss-120b',
     maxTokensField: 'max_completion_tokens',
   }),
   openAiCompatible({
