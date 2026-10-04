@@ -770,7 +770,7 @@ multi-instance safe and must be replaced before real traffic).
 
 **Further reading:** `docs/architecture.md` · `docs/database.md` ·
 `docs/security.md` · `docs/api.md` · `docs/testing.md` ·
-`docs/research/` (research trail, 01–08) · `docs/research/sources.md`
+`docs/adaptive-operations.md` · `docs/research/` (research trail, 01–08) · `docs/research/sources.md`
 (73 sources, each with URL, date, confidence grade and limitation).
 
 ## Current status
