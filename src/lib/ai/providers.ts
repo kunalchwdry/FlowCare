@@ -217,7 +217,12 @@ export const PROVIDERS: LlmProvider[] = [
     id: 'groq', label: 'Groq', note: 'Low-latency OpenAI-compatible endpoint',
     baseUrl: 'https://api.groq.com/openai/v1',
     keyEnv: () => s(process.env.GROQ_API_KEY),
-    modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'openai/gpt-oss-120b',
+    modelEnv: () => {
+      const configured = s(process.env.GROQ_MODEL);
+      // This retired/unavailable value was previously placed in Vercel. Do
+      // not let it force every request into the deterministic fallback.
+      return configured && configured !== 'llama-3.3-70b-versatile' ? configured : undefined;
+    }, defaultModel: 'openai/gpt-oss-120b',
     maxTokensField: 'max_completion_tokens',
   }),
   openAiCompatible({
