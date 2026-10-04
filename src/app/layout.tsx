@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import './print.css';
 import { headers } from 'next/headers';
 import { AppShell } from '@/components/AppShell';
 

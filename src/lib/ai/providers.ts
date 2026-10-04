@@ -39,10 +39,10 @@ export const MODEL_CHOICES: Record<string, string[]> = {
   gemini: ['gemini-2.5-flash', 'gemini-2.5-flash-lite'],
   openai: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'],
   groq: [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
     'llama-3.3-70b-versatile',
     'llama-3.1-8b-instant',
-    'mixtral-8x7b-32768',
-    'gemma2-9b-it',
   ],
   nvidia: ['meta/llama-3.3-70b-instruct', 'meta/llama-3.1-8b-instruct', 'mistralai/mixtral-8x7b-instruct-v0.1'],
   openrouter: [
@@ -101,8 +101,12 @@ async function postJson(url: string, headers: Record<string, string>, body: unkn
       cache: 'no-store',
     });
     if (!res.ok) {
-      // Log status only. Never log the prompt or the provider's body.
-      throw new Error(`provider_http_${res.status}`);
+      const upstream = await res.text();
+      const safeDetail = upstream
+        .slice(0, 240)
+        .replace(/gsk_[A-Za-z0-9_-]+/gi, '[redacted-key]')
+        .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]');
+      throw new Error(`provider_http_${res.status}${safeDetail ? `: ${safeDetail}` : ''}`);
     }
     return await res.json();
   } finally {
@@ -115,6 +119,7 @@ function openAiCompatible(cfg: {
   id: string; label: string; note: string; baseUrl: string;
   keyEnv: () => string | undefined; modelEnv: () => string | undefined; defaultModel: string;
   extraHeaders?: () => Record<string, string>;
+  maxTokensField?: 'max_tokens' | 'max_completion_tokens';
 }): LlmProvider {
   return {
     id: cfg.id,
@@ -125,21 +130,34 @@ function openAiCompatible(cfg: {
     async completeJson({ system, user, timeoutMs, maxOutputTokens = 400, credentials }) {
       const key = credentials?.apiKey ?? cfg.keyEnv();
       if (!key) throw new Error('provider_not_configured');
-      const json = await postJson(
-        `${cfg.baseUrl}/chat/completions`,
-        { Authorization: `Bearer ${key}`, ...(cfg.extraHeaders?.() ?? {}) },
-        {
-          model: credentials?.model ?? cfg.modelEnv() ?? cfg.defaultModel,
-          temperature: 0,
-          max_tokens: maxOutputTokens,
+      const url = `${cfg.baseUrl}/chat/completions`;
+      const headers = { Authorization: `Bearer ${key}`, ...(cfg.extraHeaders?.() ?? {}) };
+      const messages = [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ];
+      const baseBody = {
+        model: credentials?.model ?? cfg.modelEnv() ?? cfg.defaultModel,
+        temperature: 0,
+        messages,
+      };
+      let json: any;
+      try {
+        json = await postJson(url, headers, {
+          ...baseBody,
+          [cfg.maxTokensField ?? 'max_tokens']: maxOutputTokens,
           response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        },
-        timeoutMs,
-      );
+        }, timeoutMs);
+      } catch (error) {
+        // Groq model/account combinations can reject JSON mode or the newer
+        // token field. Retry once with the widely supported OpenAI shape; the
+        // caller still validates any extracted filters strictly.
+        if (cfg.id !== 'groq') throw error;
+        json = await postJson(url, headers, {
+          ...baseBody,
+          max_tokens: maxOutputTokens,
+        }, timeoutMs);
+      }
       const text = json?.choices?.[0]?.message?.content;
       if (typeof text !== 'string') throw new Error('provider_bad_shape');
       return text;
@@ -199,7 +217,8 @@ export const PROVIDERS: LlmProvider[] = [
     id: 'groq', label: 'Groq', note: 'Low-latency OpenAI-compatible endpoint',
     baseUrl: 'https://api.groq.com/openai/v1',
     keyEnv: () => s(process.env.GROQ_API_KEY),
-    modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'llama-3.3-70b-versatile',
+    modelEnv: () => s(process.env.GROQ_MODEL), defaultModel: 'openai/gpt-oss-120b',
+    maxTokensField: 'max_completion_tokens',
   }),
   openAiCompatible({
     id: 'nvidia', label: 'NVIDIA NIM', note: 'integrate.api.nvidia.com',
@@ -246,10 +265,9 @@ export function listProviders(): ProviderInfo[] {
 export function getProvider(id?: string | null): LlmProvider | null {
   const wanted = id ?? env.aiDefaultProvider();
   const exact = PROVIDERS.find((p) => p.id === wanted);
-  if (exact?.isConfigured()) return exact;
-  // Never silently use a provider the user did not pick when they picked one.
-  if (id) return null;
-  return PROVIDERS.find((p) => p.isConfigured()) ?? null;
+  // The application-managed provider is an explicit deployment choice. Do
+  // not silently fall back to Gemini (or another provider) after migration.
+  return exact?.isConfigured() ? exact : null;
 }
 
 /**
@@ -265,5 +283,5 @@ export function getProviderById(id: string): LlmProvider | null {
 }
 
 export function anyProviderConfigured(): boolean {
-  return PROVIDERS.some((p) => p.isConfigured());
+  return Boolean(getProvider());
 }

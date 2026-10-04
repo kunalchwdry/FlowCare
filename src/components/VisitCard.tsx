@@ -69,7 +69,7 @@ export function VisitCard({ hospitalId }: { hospitalId: string }) {
       ];
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5 py-2">
+    <div className="visit-card-print mx-auto max-w-4xl space-y-5 py-2">
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-3">
           <FlowCareBadge size={42} />
@@ -87,8 +87,8 @@ export function VisitCard({ hospitalId }: { hospitalId: string }) {
         </div>
       </div>
 
-      <article className="overflow-hidden rounded-[28px] border border-brand-800/20 bg-white shadow-pop print:rounded-none print:border-black print:shadow-none">
-        <header className="relative overflow-hidden bg-gradient-to-br from-brand-800 via-brand-700 to-violet-700 px-5 py-6 text-white sm:px-8 sm:py-8">
+      <article className="visit-card-sheet overflow-hidden rounded-[28px] border border-brand-800/20 bg-white shadow-pop print:rounded-none print:border-black print:shadow-none">
+        <header className="visit-card-hero relative overflow-hidden bg-gradient-to-br from-brand-800 via-brand-700 to-violet-700 px-5 py-6 text-white sm:px-8 sm:py-8">
           <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full border-[28px] border-white/10" />
           <div className="pointer-events-none absolute -bottom-20 right-24 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
           <div className="relative">
@@ -123,7 +123,7 @@ export function VisitCard({ hospitalId }: { hospitalId: string }) {
           </div>
         </header>
 
-        <div className="p-5 sm:p-8">
+        <div className="visit-card-content p-5 sm:p-8">
           <section className="rounded-2xl border border-brand-200 bg-brand-50/70 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
