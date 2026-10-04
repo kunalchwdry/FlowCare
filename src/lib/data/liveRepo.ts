@@ -251,7 +251,7 @@ function mapDbAppointment(r: Row, departmentName?: string): Appointment {
     scheduledFor: String(r.scheduled_for ?? r.created_at),
     status: fromDbStatus(String(r.status)),
     completedAt: r.status === 'completed' ? String(r.created_at) : null,
-    reason: null,
+    reason: (r.request_note as string | null) ?? null,
     requestedAt: String(r.created_at),
     queueId: r.queue_id ?? null, slotType: r.slot_type ?? null, approvalDeadline: r.approval_deadline ?? null, approvalStatus: r.approval_status ?? 'not_required',
     version: Number(r.version ?? 1),
@@ -352,6 +352,7 @@ export const liveRepo: Repo = {
       p_slot: input.sessionId,
       p_name: name.slice(0, 120),
       p_key: idempotencyKey(['book', input.sessionId, auth.user.id]),
+      p_request_note: input.reason ?? null,
     });
 
     if (error) {

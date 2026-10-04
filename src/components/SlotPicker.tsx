@@ -103,19 +103,19 @@ export function SlotPicker({
               ) : (
                 <div className="mt-2 space-y-2 border-t border-ink-200 pt-2">
                   <label className="block text-[11px] font-semibold text-ink-700" htmlFor={`reason-${s.id}`}>
-                    Reason for the visit (optional)
+                    What should the hospital know? <span className="font-normal text-ink-500">(optional)</span>
                   </label>
                   <input
                     id={`reason-${s.id}`}
                     value={reason}
                     maxLength={280}
                     onChange={(e) => setReason(e.target.value)}
-                    placeholder="e.g. follow-up on last month's visit"
+                    placeholder="e.g. I need a first consultation for knee pain"
                     className="w-full rounded-lg border border-ink-200 px-2 py-1.5 text-[11px]"
                   />
                   <p className="text-[10px] text-ink-500">
-                    This goes to the hospital's front desk as written. Do not describe an emergency here — for an
-                    emergency, go to the emergency department or call 108.
+                    This note is sent with your appointment request and shown to the hospital front desk. Do not
+                    describe an emergency here — for an emergency, go to the emergency department or call 108.
                   </p>
                   <div className="flex gap-1.5">
                     <button
