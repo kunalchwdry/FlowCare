@@ -47,9 +47,9 @@ function parseSseBlock(block: string): SseEvent | null {
 }
 
 /**
- * The voice bubble keeps the Gemini Live key on the server. Text is sent to
- * /api/ai-talker, PCM audio is streamed back and scheduled gaplessly in the
- * browser, and Replay uses the captured WAV returned by the server.
+ * The voice bubble keeps the Gemini Live key on the server. Text goes through
+ * canonical /api/chat first; Gemini Live only speaks that response. PCM audio
+ * is streamed back and scheduled gaplessly, and Replay uses the captured WAV.
  */
 export function FloatingAssistant() {
   const [open, setOpen] = useState(false);
@@ -89,50 +89,62 @@ export function FloatingAssistant() {
 
     const nextMessages: ChatMessage[] = [...messages, { role: 'user', content: clean }];
     const assistantId = String(nextMessages.length);
-    setMessages([...nextMessages, { role: 'assistant', content: hindi ? 'जवाब तैयार कर रहा हूँ…' : 'Synthesizing voice response…' }]);
+    setMessages([...nextMessages, { role: 'assistant', content: hindi ? 'FlowCare जवाब ढूंढ रहा है…' : 'FlowCare is checking…' }]);
     setDraft('');
     setBusy(true);
     setError(null);
     playerRef.current?.reset();
     await playerRef.current?.ensureContext();
 
-    let replyText = '';
     let audioWav: string | undefined;
-
-    const handleEvent = (incoming: SseEvent) => {
-      if (incoming.event === 'text-chunk') {
-        const text = typeof incoming.data.text === 'string' ? incoming.data.text : '';
-        replyText += text;
-        updateAssistant(assistantId, { content: replyText });
-      } else if (incoming.event === 'pcm-chunk') {
-        const chunk = typeof incoming.data.chunk === 'string' ? incoming.data.chunk : '';
-        if (chunk) void playerRef.current?.feed(chunk);
-      } else if (incoming.event === 'audio-complete') {
-        audioWav = typeof incoming.data.wav === 'string' ? incoming.data.wav : undefined;
-      } else if (incoming.event === 'error') {
-        const message = typeof incoming.data.message === 'string' ? incoming.data.message : 'Gemini voice could not respond.';
-        setError(message);
-      } else if (incoming.event === 'turn-end') {
-        updateAssistant(assistantId, {
-          content: replyText || (hindi ? '🔊 बोलकर जवाब दिया' : '🔊 Spoken reply'),
-          audioWav,
-        });
-        setBusy(false);
-      }
-    };
+    let streamError: string | null = null;
 
     try {
-      const response = await fetch('/api/ai-talker', {
+      // Keep the canonical, data-backed assistant contract as the source of
+      // truth. Gemini Live is used only to speak the returned reply, never to
+      // invent hospitals, slots, or appointment confirmations.
+      const chatResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: clean, language }),
+        body: JSON.stringify({
+          message: clean,
+          history: messages.slice(-10).map(({ role, content: text }) => ({ role, content: text })),
+          location: null,
+          language,
+        }),
       });
-      if (!response.ok || !response.body) {
-        const payload = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(payload?.error ?? `Gemini voice returned HTTP ${response.status}.`);
+      const chatPayload = await chatResponse.json().catch(() => null) as { ok?: boolean; data?: { reply?: unknown }; error?: { message?: string } } | null;
+      if (!chatResponse.ok || !chatPayload?.ok) {
+        throw new Error(chatPayload?.error?.message ?? `The assistant returned HTTP ${chatResponse.status}.`);
       }
 
-      const reader = response.body.getReader();
+      const canonicalReply = String(chatPayload.data?.reply ?? (hindi ? 'मैं इस अनुरोध को समझ नहीं सका।' : 'I could not understand that request.'));
+      updateAssistant(assistantId, { content: canonicalReply });
+
+      const handleEvent = (incoming: SseEvent) => {
+        if (incoming.event === 'pcm-chunk') {
+          const chunk = typeof incoming.data.chunk === 'string' ? incoming.data.chunk : '';
+          if (chunk) void playerRef.current?.feed(chunk);
+        } else if (incoming.event === 'audio-complete') {
+          audioWav = typeof incoming.data.wav === 'string' ? incoming.data.wav : undefined;
+        } else if (incoming.event === 'error') {
+          streamError = typeof incoming.data.message === 'string' ? incoming.data.message : 'Gemini voice could not respond.';
+        } else if (incoming.event === 'turn-end') {
+          updateAssistant(assistantId, { content: canonicalReply, audioWav });
+        }
+      };
+
+      const voiceResponse = await fetch('/api/ai-talker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: clean, language, synthesisText: canonicalReply }),
+      });
+      if (!voiceResponse.ok || !voiceResponse.body) {
+        const payload = await voiceResponse.json().catch(() => null) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Gemini voice returned HTTP ${voiceResponse.status}.`);
+      }
+
+      const reader = voiceResponse.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       while (true) {
@@ -150,11 +162,11 @@ export function FloatingAssistant() {
         const parsed = parseSseBlock(buffer);
         if (parsed) handleEvent(parsed);
       }
-      setBusy(false);
+      if (streamError) setError(streamError);
     } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'The assistant could not respond.');
+    } finally {
       setBusy(false);
-      setError(caught instanceof Error ? caught.message : 'Gemini voice could not respond.');
-      updateAssistant(assistantId, { content: hindi ? 'Gemini से आवाज़ वाला जवाब नहीं मिल सका।' : 'Gemini voice could not respond.' });
     }
   }
 

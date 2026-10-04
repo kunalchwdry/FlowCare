@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Too many voice requests. Please wait a moment.' }, { status: 429 });
   }
 
-  let body: { message: string; language?: 'en' | 'hi' };
+  let body: { message: string; language?: 'en' | 'hi'; synthesisText?: string };
   try {
     body = await req.json();
   } catch {
@@ -105,6 +105,10 @@ export async function POST(req: NextRequest) {
   }
 
   const isHindi = body.language === 'hi';
+  const synthesisText = typeof body.synthesisText === 'string' ? body.synthesisText.trim() : '';
+  if (synthesisText.length > 700) {
+    return Response.json({ error: 'Synthesis text is too long' }, { status: 400 });
+  }
   const emergency = IMMEDIATE_HELP_QUERY.test(message);
   const systemPrompt = isHindi
     ? 'You are FlowCare AI, a friendly voice assistant for hospital discovery. Speak only natural, concise Hindi. FlowCare can help find and compare hospitals, departments, accessibility options, and published appointments. Do not diagnose, prescribe, triage, or invent hospital availability. If the user describes an emergency, read the supplied safety notice exactly and add nothing clinical.'
@@ -168,9 +172,11 @@ export async function POST(req: NextRequest) {
 
         const turnText = emergency
           ? `[Read this exact safety notice aloud in ${isHindi ? 'Hindi' : 'English'} and do not add advice]: ${isHindi ? EMERGENCY_HI : EMERGENCY_EN}`
-          : isHindi
-            ? `[User language: Hindi. Please reply aloud in spoken Hindi]: ${message}`
-            : `[User language: English. Please reply aloud in spoken English]: ${message}`;
+          : synthesisText
+            ? `[Read this exact FlowCare response aloud in ${isHindi ? 'Hindi' : 'English'} and do not add or change any claims]: ${synthesisText}`
+            : isHindi
+              ? `[User language: Hindi. Please reply aloud in spoken Hindi]: ${message}`
+              : `[User language: English. Please reply aloud in spoken English]: ${message}`;
 
         session.sendClientContent({ turns: [turnText] });
 
