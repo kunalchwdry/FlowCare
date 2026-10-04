@@ -128,7 +128,7 @@ export default function AssistantPage() {
         return rank(a) - rank(b);
       });
       preferredVoiceRef.current = ranked[0] ?? null;
-      if (feminineEnglish.length > 0 && ranked[0]) setVoiceLabel(`Feminine voice: ${ranked[0].name}`);
+      if (feminineEnglish.length > 0 && ranked[0]) setVoiceLabel(`Warm feminine voice: ${ranked[0].name}`);
       else if (ranked[0]) setVoiceLabel(`English voice: ${ranked[0].name}`);
       else setVoiceLabel('Feminine browser voice preferred');
     };
@@ -191,7 +191,11 @@ export default function AssistantPage() {
     } else {
       utterance.lang = 'en-IN';
     }
-    utterance.rate = 0.95;
+    // A slightly slower pace and gentle pitch make the browser voice sound
+    // warmer and easier to follow, especially on short hospital instructions.
+    utterance.rate = 0.9;
+    utterance.pitch = 1.08;
+    utterance.volume = 1;
     utterance.onstart = () => { setIsSpeaking(true); setSpeakingText(text); };
     utterance.onend = () => { setIsSpeaking(false); setSpeakingText(null); };
     utterance.onerror = () => { setIsSpeaking(false); setSpeakingText(null); };
