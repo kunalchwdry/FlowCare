@@ -27,6 +27,9 @@ const Body = z.object({
   page: z.number().int().min(1).max(50).optional(),
 }).strict();
 
+const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction|unconscious|can't breathe|cannot breathe|severe bleeding|heart attack|stroke|overdose|suicid(?:e|al)|self[- ]harm)\b/i;
+const EMOTIONAL_SUPPORT_QUERY = /\b(i(?:'m| am)\s+(?:feeling\s+)?(?:sad|depressed|anxious|lonely|hopeless)|feeling\s+(?:sad|low|hopeless|unsafe)|want\s+to\s+die|hurt myself|self[- ]harm)\b/i;
+const EMOTIONAL_SUPPORT_NOTICE = 'If you might hurt yourself or are in immediate danger, call 112 in India or go to the nearest emergency department now. If you are safe right now, FlowCare can help you find a mental-health professional, but it cannot provide crisis counselling.';
 
 export async function POST(req: NextRequest) {
   try {
@@ -65,6 +68,34 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedQuery = body.query.trim().toLowerCase().replace(/loacation/g, 'location').replace(/\s+/g, ' ');
+
+    // High-risk phrases must not be treated as ordinary directory searches.
+    // This branch is deterministic so it still works when the LLM key is
+    // missing, expired, or unavailable on a Vercel preview deployment.
+    if (IMMEDIATE_HELP_QUERY.test(normalizedQuery)) {
+      return ok({
+        reply: 'This may need urgent medical attention. Call 112 in India or go to the nearest emergency department now. Do not wait for FlowCare to find a routine appointment.',
+        understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
+        aiUnavailableReason: null,
+        safetyNotice: EMERGENCY_NOTICE,
+        scopeNotice: SCOPE_NOTICE,
+        locationNotice: null,
+        results: [], total: 0, emptyReason: null, computedAt: new Date().toISOString(),
+      });
+    }
+
+    if (EMOTIONAL_SUPPORT_QUERY.test(normalizedQuery)) {
+      return ok({
+        reply: 'I\'m sorry you\'re feeling this way. If you are safe right now, I can help you find a mental-health professional or psychiatry department. If you might hurt yourself or are in immediate danger, call 112 or go to the nearest emergency department now.',
+        understood: { filters: {}, explanation: [], source: 'deterministic', provider: null, model: null, latencyMs: null },
+        aiUnavailableReason: null,
+        safetyNotice: EMOTIONAL_SUPPORT_NOTICE,
+        scopeNotice: SCOPE_NOTICE,
+        locationNotice: null,
+        results: [], total: 0, emptyReason: null, computedAt: new Date().toISOString(),
+      });
+    }
+
     if (
       /\bwhere\s+am\s+i\b/i.test(normalizedQuery)
       || /\bwhat(?:'s| is)\s+my\s+(?:current\s+)?location\b/i.test(normalizedQuery)
