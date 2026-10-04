@@ -25,6 +25,7 @@ const Body = z.object({
   }).strict()).max(12).default([]),
   location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).nullish(),
   page: z.number().int().min(1).max(50).optional(),
+  language: z.enum(['en', 'hi']).default('en'),
 }).strict();
 
 const IMMEDIATE_HELP_QUERY = /\b(snake\s*bite|snake has bitten|poison(?:ed|ing)?|anaphylaxis|severe allergic reaction|unconscious|can't breathe|cannot breathe|severe bleeding|heart attack|stroke|overdose|suicid(?:e|al)|self[- ]harm)\b/i;

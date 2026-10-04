@@ -2,12 +2,40 @@
 
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { FlowCareMark } from '@/components/Brand';
-import { IconClose } from '@/components/Icons';
+import { IconClose, IconMic, IconStop } from '@/components/Icons';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
+
+interface SpeechResultItem {
+  transcript: string;
+}
+
+interface SpeechResultList {
+  length: number;
+  [index: number]: { length: number; [index: number]: SpeechResultItem };
+}
+
+interface SpeechResultEvent extends Event {
+  results: SpeechResultList;
+}
+
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start(): void;
+  stop(): void;
+  onresult: ((event: SpeechResultEvent) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+type VoiceLanguage = 'en' | 'hi';
 
 const WELCOME: ChatMessage = {
   role: 'assistant',
@@ -15,28 +43,47 @@ const WELCOME: ChatMessage = {
 };
 
 /**
- * Compact, typed-only assistant launcher for the patient app. The full-page
- * assistant is intentionally not used; this bubble is the single assistant
- * entry point and talks to the same server-owned /api/chat contract.
+ * FlowCare's single assistant entry point. Gemini handles the healthcare
+ * search intent on /api/chat; the browser only provides optional microphone
+ * input and spoken playback for this compact bubble.
  */
 export function FloatingAssistant() {
   const [open, setOpen] = useState(false);
+  const [language, setLanguage] = useState<VoiceLanguage>('en');
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  const hindi = language === 'hi';
 
   useEffect(() => {
     if (open) endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, open]);
+  }, [messages, open, busy]);
 
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || busy) return;
+  useEffect(() => () => {
+    recognitionRef.current?.stop();
+    if (typeof window !== 'undefined') window.speechSynthesis?.cancel();
+  }, []);
 
-    const nextMessages: ChatMessage[] = [...messages, { role: 'user', content }];
+  function speak(text: string, lang = language) {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === 'hi' ? 'hi-IN' : 'en-IN';
+    utterance.rate = 0.96;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function sendMessage(content: string) {
+    const clean = content.trim();
+    if (!clean || busy) return;
+
+    const nextMessages: ChatMessage[] = [...messages, { role: 'user', content: clean }];
     setMessages(nextMessages);
     setDraft('');
     setBusy(true);
@@ -47,16 +94,19 @@ export function FloatingAssistant() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: content,
+          message: clean,
           history: messages.slice(-10),
           location: null,
+          language,
         }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error?.message ?? 'The assistant could not respond.');
+        throw new Error(payload?.error?.message ?? `The assistant returned HTTP ${response.status}.`);
       }
-      setMessages([...nextMessages, { role: 'assistant', content: payload.data.reply }]);
+      const reply = String(payload.data.reply ?? 'I could not understand that request.');
+      setMessages([...nextMessages, { role: 'assistant', content: reply }]);
+      speak(reply);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'The assistant could not respond.');
     } finally {
@@ -64,9 +114,69 @@ export function FloatingAssistant() {
     }
   }
 
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    void sendMessage(draft);
+  }
+
+  function startListening() {
+    if (busy || listening) return;
+    if (typeof window === 'undefined') return;
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const Constructor = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!Constructor) {
+      setError(hindi ? 'इस ब्राउज़र में आवाज़ से लिखना उपलब्ध नहीं है। कृपया टाइप करें।' : 'Voice input is not available in this browser. Please type instead.');
+      return;
+    }
+
+    const recognition = new Constructor();
+    recognition.lang = hindi ? 'hi-IN' : 'en-IN';
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+      if (transcript) void sendMessage(transcript);
+    };
+    recognition.onerror = (event) => {
+      setListening(false);
+      if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        setError(hindi ? 'माइक से आवाज़ नहीं मिल सकी। कृपया फिर कोशिश करें।' : 'I could not hear you. Please try again.');
+      }
+    };
+    recognition.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    setError(null);
+    setListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setError(hindi ? 'माइक शुरू नहीं हो सका। कृपया टाइप करें।' : 'The microphone could not start. Please type instead.');
+    }
+  }
+
+  function stopListening() {
+    recognitionRef.current?.stop();
+    setListening(false);
+  }
+
   function reset() {
+    window.speechSynthesis?.cancel();
+    stopListening();
     setMessages([WELCOME]);
     setDraft('');
+    setError(null);
+  }
+
+  function toggleLanguage() {
+    setLanguage((current) => current === 'en' ? 'hi' : 'en');
     setError(null);
   }
 
@@ -74,65 +184,48 @@ export function FloatingAssistant() {
     <div className="pointer-events-none fixed bottom-[76px] right-4 z-50 sm:bottom-6 sm:right-6">
       {open && (
         <section
-          className="pointer-events-auto mb-3 flex h-[min(520px,calc(100vh-120px))] w-[min(370px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-ink-200 bg-white shadow-2xl"
-          aria-label="FlowCare floating assistant"
+          className="pointer-events-auto mb-3 flex h-[min(560px,calc(100vh-120px))] w-[min(475px,calc(100vw-2rem))] flex-col overflow-hidden rounded-3xl border border-ink-200 bg-white shadow-2xl"
+          aria-label={hindi ? 'FlowCare लाइव वॉइस असिस्टेंट' : 'FlowCare live voice assistant'}
         >
           <header className="flex items-center gap-2.5 border-b border-ink-200 bg-white px-4 py-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand-50 text-brand-600">
-              <FlowCareMark size={21} />
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-500 text-white shadow-sm">
+              <FlowCareMark size={25} />
             </span>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-extrabold text-ink-900">FlowCare Assistant</h2>
-              <p className="text-[11px] text-ink-500">Hospital discovery and appointments</p>
+              <h2 className="truncate text-base font-extrabold text-ink-900">FlowCare AI <span className="ml-1 rounded-full bg-brand-50 px-2 py-1 text-[10px] font-bold text-brand-700">{hindi ? 'in English' : 'in हिंदी'}</span></h2>
+              <p className="text-xs text-ink-500">{hindi ? 'लाइव वॉइस असिस्टेंट' : 'Live Voice Assistant'}</p>
             </div>
-            <div className="ml-auto flex items-center gap-1">
-              <button
-                type="button"
-                onClick={reset}
-                className="rounded-lg px-2 py-1 text-[11px] font-semibold text-ink-500 hover:bg-ink-50"
-              >
-                New
+            <div className="ml-auto flex items-center gap-2">
+              <button type="button" onClick={toggleLanguage} className="rounded-xl border border-ink-200 px-2.5 py-1.5 text-[11px] font-semibold text-ink-700 hover:bg-ink-50">
+                {hindi ? 'Switch language' : 'भाषा बदलें'}
               </button>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-ink-500 hover:bg-ink-100"
-                aria-label="Close FlowCare assistant"
-              >
-                <IconClose width={16} height={16} />
+              <button type="button" onClick={() => setOpen(false)} className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-ink-100" aria-label="Close FlowCare assistant">
+                <IconClose width={18} height={18} />
               </button>
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-ink-50/40 px-3 py-4" aria-live="polite">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-white px-5 py-4" aria-live="polite">
             {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <p
-                  className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
-                    message.role === 'user'
-                      ? 'rounded-br-md bg-brand-600 text-white'
-                      : 'rounded-bl-md border border-ink-200 bg-white text-ink-700'
-                  }`}
-                >
-                  {message.content}
-                </p>
+              <div key={`${message.role}-${index}`} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {message.role === 'user' ? (
+                  <p className="max-w-[82%] rounded-2xl rounded-br-md bg-brand-600 px-4 py-3 text-sm leading-relaxed text-white">{message.content}</p>
+                ) : (
+                  <div className="max-w-[86%] rounded-2xl rounded-bl-md border border-ink-200 bg-ink-50/60 px-4 py-3 text-sm leading-relaxed text-ink-800">
+                    <p><span aria-hidden="true">🎙️</span> <span aria-hidden="true">🔊</span> {message.content} <span className="text-xs text-ink-400">({hindi ? 'बोलकर जवाब दिया' : 'Spoken reply'})</span></p>
+                    <button type="button" onClick={() => speak(message.content)} className="mt-2 rounded-xl border border-brand-300 bg-white px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-50">
+                      🔊 {hindi ? 'आवाज़ दोबारा सुनें' : 'Replay voice'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
-            {busy && (
-              <div className="flex justify-start">
-                <p className="rounded-2xl rounded-bl-md border border-ink-200 bg-white px-3.5 py-2.5 text-xs text-ink-500">
-                  Checking FlowCare…
-                </p>
-              </div>
-            )}
-            {error && <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p>}
+            {busy && <p className="w-fit rounded-2xl rounded-bl-md border border-ink-200 bg-ink-50 px-4 py-3 text-xs text-ink-500">{hindi ? 'FlowCare जवाब खोज रहा है…' : 'FlowCare is checking…'}</p>}
+            {error && <p className="w-fit rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{error}</p>}
             <div ref={endRef} />
           </div>
 
-          <form onSubmit={send} className="border-t border-ink-200 bg-white p-3">
+          <form onSubmit={submit} className="border-t border-ink-200 bg-white p-4">
             <div className="flex items-end gap-2 rounded-2xl border border-ink-300 bg-white p-1.5 focus-within:border-brand-500 focus-within:ring-4 focus-within:ring-brand-500/10">
               <textarea
                 value={draft}
@@ -145,33 +238,22 @@ export function FloatingAssistant() {
                 }}
                 rows={1}
                 maxLength={400}
-                placeholder="Ask FlowCare…"
-                aria-label="Message FlowCare assistant"
-                className="max-h-20 min-h-[34px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-xs text-ink-900 outline-none placeholder:text-ink-400"
+                placeholder={hindi ? 'अपना सवाल लिखें (बोलकर जवाब मिलेगा)…' : 'Type your question (you can also speak)…'}
+                aria-label={hindi ? 'FlowCare को संदेश लिखें' : 'Message FlowCare assistant'}
+                className="max-h-20 min-h-[38px] flex-1 resize-none border-0 bg-transparent px-2 py-2.5 text-sm text-ink-900 outline-none placeholder:text-ink-400"
               />
-              <button
-                type="submit"
-                disabled={busy || !draft.trim()}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-600 text-sm font-bold text-white hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-400"
-                aria-label="Send message"
-              >
-                ↑
+              <button type="button" onClick={listening ? stopListening : startListening} disabled={busy} className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${listening ? 'bg-rose-500 text-white' : 'bg-ink-100 text-ink-600 hover:bg-brand-50 hover:text-brand-700'} disabled:cursor-not-allowed disabled:opacity-50`} aria-label={listening ? 'Stop listening' : 'Speak to FlowCare'}>
+                {listening ? <IconStop width={18} height={18} /> : <IconMic width={18} height={18} />}
               </button>
+              <button type="submit" disabled={busy || !draft.trim()} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-500 text-xl font-bold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:bg-ink-200 disabled:text-ink-400" aria-label="Send message">↑</button>
             </div>
-            <p className="mt-1.5 text-center text-[10px] text-ink-400">FlowCare helps you discover care; it does not diagnose.</p>
+            <p className="mt-2 text-center text-[10px] text-ink-400">{hindi ? 'माइक की अनुमति दें या टाइप करें · FlowCare चिकित्सा सलाह नहीं देता' : 'Allow microphone access or type · FlowCare does not diagnose'}</p>
           </form>
         </section>
       )}
 
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className={`pointer-events-auto ml-auto grid h-16 w-16 place-items-center rounded-2xl bg-brand-600 text-white shadow-xl shadow-brand-600/25 ring-4 ring-white transition hover:-translate-y-0.5 hover:bg-brand-700 focus:outline-none focus:ring-brand-200 ${open ? 'rotate-0' : ''}`}
-        aria-label={open ? 'Close FlowCare assistant' : 'Open FlowCare assistant'}
-        aria-expanded={open}
-      >
-        {open ? <IconClose width={25} height={25} /> : <FlowCareMark size={31} title="FlowCare assistant" />}
-        {!open && <span className="sr-only">Open FlowCare assistant</span>}
+      <button type="button" onClick={() => setOpen((current) => !current)} className="pointer-events-auto ml-auto grid h-16 w-16 place-items-center rounded-2xl bg-brand-500 text-white shadow-xl shadow-brand-500/25 ring-4 ring-white transition hover:-translate-y-0.5 hover:bg-brand-600 focus:outline-none focus:ring-brand-200" aria-label={open ? 'Close FlowCare assistant' : 'Open FlowCare live voice assistant'} aria-expanded={open}>
+        {open ? <IconClose width={25} height={25} /> : <FlowCareMark size={31} title="FlowCare live voice assistant" />}
       </button>
     </div>
   );
