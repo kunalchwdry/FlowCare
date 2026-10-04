@@ -126,21 +126,34 @@ function openAiCompatible(cfg: {
     async completeJson({ system, user, timeoutMs, maxOutputTokens = 400, credentials }) {
       const key = credentials?.apiKey ?? cfg.keyEnv();
       if (!key) throw new Error('provider_not_configured');
-      const json = await postJson(
-        `${cfg.baseUrl}/chat/completions`,
-        { Authorization: `Bearer ${key}`, ...(cfg.extraHeaders?.() ?? {}) },
-        {
-          model: credentials?.model ?? cfg.modelEnv() ?? cfg.defaultModel,
-          temperature: 0,
+      const url = `${cfg.baseUrl}/chat/completions`;
+      const headers = { Authorization: `Bearer ${key}`, ...(cfg.extraHeaders?.() ?? {}) };
+      const messages = [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ];
+      const baseBody = {
+        model: credentials?.model ?? cfg.modelEnv() ?? cfg.defaultModel,
+        temperature: 0,
+        messages,
+      };
+      let json: any;
+      try {
+        json = await postJson(url, headers, {
+          ...baseBody,
           [cfg.maxTokensField ?? 'max_tokens']: maxOutputTokens,
           response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-        },
-        timeoutMs,
-      );
+        }, timeoutMs);
+      } catch (error) {
+        // Groq model/account combinations can reject JSON mode or the newer
+        // token field. Retry once with the widely supported OpenAI shape; the
+        // caller still validates any extracted filters strictly.
+        if (cfg.id !== 'groq') throw error;
+        json = await postJson(url, headers, {
+          ...baseBody,
+          max_tokens: maxOutputTokens,
+        }, timeoutMs);
+      }
       const text = json?.choices?.[0]?.message?.content;
       if (typeof text !== 'string') throw new Error('provider_bad_shape');
       return text;
