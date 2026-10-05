@@ -9,6 +9,9 @@ import {
 } from '@/components/Icons';
 import type { Appointment, Hospital } from '@/lib/types';
 import { formatDateTime } from '@/lib/time';
+import { ReliabilityCard, ReliabilityErrorCard } from '@/components/ReliabilityCard';
+import { VerifiedVisitHistory } from '@/components/VerifiedVisitHistory';
+import type { PatientReliability, VerifiedVisit } from '@/lib/reliability/types';
 
 export const metadata: Metadata = { title: 'Your dashboard — FlowCare' };
 export const dynamic = 'force-dynamic';
@@ -53,8 +56,17 @@ export default async function PatientDashboard() {
   const [appointments, hospitals, favorites] = await Promise.all([
     repo.listAppointments({ patientId: user.id }),
     repo.listHospitals(),
-    repo.listFavorites(user.id).catch(() => []),
+    repo.listFavorites(user.id),
   ]);
+
+  const [reliabilityResult, visitsResult] = await Promise.allSettled([
+    repo.getPatientReliability(user.id),
+    repo.listVerifiedVisits(user.id),
+  ]);
+  const reliability: PatientReliability | null = reliabilityResult.status === 'fulfilled' ? reliabilityResult.value : null;
+  const verifiedVisits: VerifiedVisit[] = visitsResult.status === 'fulfilled' ? visitsResult.value : [];
+  if (reliabilityResult.status === 'rejected') console.error('[patient] reliability read failed', reliabilityResult.reason);
+  if (visitsResult.status === 'rejected') console.error('[patient] verified visit history read failed', visitsResult.reason);
 
   const byId = new Map<string, Hospital>(hospitals.map((h) => [h.id, h]));
   const sorted = [...appointments].sort((a, b) => b.scheduledFor.localeCompare(a.scheduledFor));
@@ -113,6 +125,11 @@ export default async function PatientDashboard() {
           </div>
         ))}
       </section>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {reliability ? <ReliabilityCard reliability={reliability} /> : <ReliabilityErrorCard />}
+        <VerifiedVisitHistory visits={verifiedVisits} error={visitsResult.status === 'rejected'} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         {/* ------------------------------------------- current appointment */}

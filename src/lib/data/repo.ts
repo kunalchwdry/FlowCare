@@ -6,6 +6,8 @@ import type {
 import type {
   NewOperationalDepartment, NewOperationalService, NewOperationalSlot, NewProvider, NewProviderSchedule, OperationalDepartment, OperationalService, OperationalSlot, Provider, ProviderSchedule, QueueListFilters,
 } from '@/lib/operations/types';
+import type { PatientTrafficSnapshot } from '@/lib/traffic/traffic';
+import type { HospitalPatientProfile, PatientReliability, VerifiedVisit } from '@/lib/reliability/types';
 import type {
   AccessibilityComponent, Appointment, AppointmentMessage, ArrivalPack, CareContext,
   ClinicSession, FacilityCharge, FacilityCorrection, Favorite, FollowUpTask, Hospital,
@@ -21,9 +23,17 @@ export interface Repo {
   getHospital(idOrSlug: string): Promise<Hospital | null>;
   listSessions(hospitalIds?: string[]): Promise<ClinicSession[]>;
   listQueues(hospitalIds?: string[]): Promise<QueueSnapshot[]>;
+  /** Aggregate appointment traffic; never returns patient or appointment rows. */
+  listPatientTraffic(hospitalIds?: string[], options?: { detailed?: boolean }): Promise<PatientTrafficSnapshot[]>;
   listReviews(opts?: { hospitalId?: string; includeNonPublished?: boolean }): Promise<HospitalReview[]>;
   listAppointments(opts: { patientId?: string; hospitalId?: string }): Promise<Appointment[]>;
   getAppointment(id: string): Promise<Appointment | null>;
+
+  /** Patient-owned reliability summary and verified appointment-linked history. */
+  getPatientReliability(patientId: string): Promise<PatientReliability>;
+  listVerifiedVisits(patientId: string): Promise<VerifiedVisit[]>;
+  /** Hospital relationship-scoped projection; input is an appointment, not a patient search. */
+  getHospitalPatientProfile(appointmentId: string, hospitalId?: string): Promise<HospitalPatientProfile | null>;
   /** Creates a slot REQUEST. Never returns a confirmed booking. */
   requestAppointment(input: NewAppointmentRequest): Promise<Appointment>;
 
