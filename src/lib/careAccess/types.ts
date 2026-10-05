@@ -18,7 +18,7 @@ export type CareAccessAction =
   | 'screen' | 'offer_options' | 'select_option' | 'submit_referral'
   | 'request_approval' | 'approve' | 'expire_approval' | 'reject'
   | 'acknowledge' | 'request_info' | 'provide_info' | 'accept' | 'redirect'
-  | 'offer_slot' | 'join_waitlist' | 'book' | 'remind' | 'reschedule'
+  | 'offer_slot' | 'join_waitlist' | 'book' | 'confirm_booking' | 'remind' | 'reschedule'
   | 'request_reschedule' | 'cancel' | 'arrive' | 'no_show' | 'complete'
   | 'open_follow_up' | 'request_recovery' | 'offer_recovery'
   | 'select_recovery' | 'rebook' | 'close';

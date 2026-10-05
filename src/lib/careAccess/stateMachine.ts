@@ -18,7 +18,7 @@ const RULES: Record<CareAccessAction, Rule> = {
   screen: { from: ['REQUESTED'], to: 'SCREENED', by: ['system'] },
   offer_options: { from: ['SCREENED'], to: 'OPTIONS_OFFERED', by: ['system'] },
   select_option: { from: ['OPTIONS_OFFERED', 'RECOVERY_OPTIONS_AVAILABLE'], to: 'PATIENT_SELECTED', by: ['patient'], requiresOption: true },
-  submit_referral: { from: ['PATIENT_SELECTED'], to: 'REFERRAL_SUBMITTED', by: ['patient', 'system'] },
+  submit_referral: { from: ['PATIENT_SELECTED', 'SLOT_OFFERED', 'RESCHEDULED', 'REBOOKED'], to: 'REFERRAL_SUBMITTED', by: ['patient', 'system'] },
   request_approval: { from: ['PATIENT_SELECTED', 'REFERRAL_SUBMITTED'], to: 'APPROVAL_PENDING', by: ['patient', 'system'], requiresOption: true },
   approve: { from: ['APPROVAL_PENDING'], to: 'APPROVED', by: ['hospital'] },
   expire_approval: { from: ['APPROVAL_PENDING'], to: 'APPROVAL_EXPIRED', by: ['system'], requiresReason: true },
@@ -30,7 +30,11 @@ const RULES: Record<CareAccessAction, Rule> = {
   redirect: { from: ['ACKNOWLEDGED', 'ACCEPTED', 'REFERRAL_SUBMITTED', 'REJECTED'], to: 'REDIRECTED', by: ['hospital'], requiresReason: true },
   offer_slot: { from: ['ACCEPTED', 'REDIRECTED', 'APPROVED', 'WAITLISTED'], to: 'SLOT_OFFERED', by: ['hospital'], requiresOption: true },
   join_waitlist: { from: ['PATIENT_SELECTED', 'RECOVERY_REQUIRED'], to: 'WAITLISTED', by: ['patient', 'system'], requiresOption: true },
-  book: { from: ['PATIENT_SELECTED', 'SLOT_OFFERED', 'RESCHEDULED', 'REBOOKED'], to: 'BOOKED', by: ['patient', 'system'] },
+  // The patient-facing API action named "book" is translated to
+  // submit_referral. A direct Care Access booking transition is intentionally
+  // unavailable; only confirm_booking after hospital acceptance reaches BOOKED.
+  book: { from: [], to: 'BOOKED', by: [] },
+  confirm_booking: { from: ['ACCEPTED'], to: 'BOOKED', by: ['system'] },
   remind: { from: ['BOOKED'], to: 'REMINDER', by: ['system'] },
   request_reschedule: { from: ['BOOKED', 'REMINDER'], to: 'RESCHEDULE_REQUESTED', by: ['patient'], requiresReason: true },
   reschedule: { from: ['RESCHEDULE_REQUESTED', 'BOOKED', 'REMINDER'], to: 'RESCHEDULED', by: ['hospital', 'patient'], requiresReason: true },

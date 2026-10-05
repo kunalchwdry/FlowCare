@@ -49,6 +49,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     if (body.expectedVersion !== undefined && body.expectedVersion !== current.version) return fail(409, 'This care request changed. Reload before trying again.', { code: 'VERSION_CONFLICT' });
 
     let appointmentId = body.appointmentId ?? null;
+    if (body.action === 'cancel' && current.appointmentId) {
+      if (!body.reason?.trim()) return fail(422, 'A reason is required for this care-journey action.');
+      const appointment = await repo.getAppointment(current.appointmentId);
+      if (!appointment) return fail(409, 'The linked appointment is no longer available.');
+      if (['requested', 'booked', 'reschedule_proposed'].includes(appointment.status)) {
+        await repo.transitionAppointment({
+          appointmentId: appointment.id, action: 'cancel', actor: 'patient', actorId: user.id, actorRole: user.role,
+          expectedVersion: appointment.version, reason: body.reason,
+        });
+      }
+    }
     if (body.action === 'book') {
       const option = (await repo.listCareOptions(id)).find((o) => o.id === current.selectedOptionId);
       if (!option?.sessionId) return fail(409, 'This option has no current slot. Choose another option or ask the hospital for a slot.');
@@ -56,9 +67,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       appointmentId = appointment.id;
     }
 
+    // "book" is the patient-facing action name, but this endpoint only sends
+    // a booking request. The Care Access journey must not become BOOKED until
+    // the hospital accepts the linked appointment.
+    const transitionAction = body.action === 'book' ? 'submit_referral' : body.action;
     const request = await repo.transitionCareRequest({
-      careRequestId: id, action: body.action, actor: 'patient', actorId: user.id, actorRole: user.role,
+      careRequestId: id, action: transitionAction, actor: 'patient', actorId: user.id, actorRole: user.role,
       expectedVersion: body.expectedVersion ?? current.version, reason: body.reason ?? null, appointmentId,
+      metadata: body.action === 'book' ? { confirmation: 'pending_hospital' } : undefined,
     });
     return ok({ request, transitions: await repo.listCareTransitions(id) });
   } catch (e) {

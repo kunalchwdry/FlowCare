@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Selecting an option immediately branches by the database-backed slot type:
- * instant books, approval_required creates an approval queue entry, and
+ * an instant slot creates an appointment request that still needs hospital
+ * confirmation, approval_required creates an approval queue entry, and
  * waitlist creates a waitlist entry. The client never chooses a status.
  */
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: string; optionId: string }> }) {
@@ -34,9 +35,9 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       if (!option.sessionId) return fail(409, 'This option no longer has a bookable slot.');
       const appointment = await repo.requestAppointment({ patientId: user.id, sessionId: option.sessionId });
       result = await repo.transitionCareRequest({
-        careRequestId: id, action: 'book', actor: 'patient', actorId: user.id, actorRole: user.role,
+        careRequestId: id, action: 'submit_referral', actor: 'patient', actorId: user.id, actorRole: user.role,
         expectedVersion: selected.version, appointmentId: appointment.id, optionId,
-        metadata: { optionId, slotType: 'instant' },
+        metadata: { optionId, slotType: 'instant', confirmation: 'pending_hospital' },
       });
     } else if (slotType === 'waitlist') {
       result = await repo.transitionCareRequest({

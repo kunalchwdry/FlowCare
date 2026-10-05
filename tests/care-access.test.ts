@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractCareAccessRequest } from '@/lib/careAccess/extract';
 import { CareAccessTransitionError, planCareAccessTransition } from '@/lib/careAccess/stateMachine';
@@ -30,6 +32,39 @@ describe('care access request extraction', () => {
   });
 });
 
+describe('Care Access patient-facing booking truth', () => {
+  const patientUi = readFileSync(resolve(process.cwd(), 'src/components/CareAccessExchange.tsx'), 'utf8');
+  const instantRoute = readFileSync(resolve(process.cwd(), 'src/app/api/care-requests/[id]/options/[optionId]/select/route.ts'), 'utf8');
+  const patientActionRoute = readFileSync(resolve(process.cwd(), 'src/app/api/care-requests/[id]/route.ts'), 'utf8');
+  const bookingTruthMigration = readFileSync(resolve(process.cwd(), 'supabase/migrations/0023_care_access_booking_truth.sql'), 'utf8');
+  const hospitalUi = readFileSync(resolve(process.cwd(), 'src/components/hospital/HospitalCareAccessPanel.tsx'), 'utf8');
+
+  it('labels a sent request separately from a hospital-confirmed booking', () => {
+    expect(patientUi).toContain("REFERRAL_SUBMITTED: 'Request sent — awaiting hospital confirmation'");
+    expect(patientUi).toContain("BOOKED: 'Hospital confirmed'");
+    expect(patientUi).toContain('Request hospital confirmation');
+    expect(patientUi).not.toContain("BOOKED: 'Booking confirmed'");
+  });
+
+  it('routes instant-slot selection and offered-slot requests through pending referral state', () => {
+    expect(instantRoute).toContain("action: 'submit_referral'");
+    expect(instantRoute).toContain("confirmation: 'pending_hospital'");
+    expect(patientActionRoute).toContain("const transitionAction = body.action === 'book' ? 'submit_referral' : body.action;");
+  });
+
+  it('keeps the live instant-slot RPC in requested status until hospital acceptance', () => {
+    expect(bookingTruthMigration).toContain("'requested', q, st");
+    expect(bookingTruthMigration).toContain("'approval_pending', null, s.starts_at");
+    expect(bookingTruthMigration).not.toContain("case when st = 'instant' then 'confirmed' else 'requested' end");
+  });
+
+  it('keeps acknowledgement and acceptance visible in the hospital queue', () => {
+    expect(hospitalUi).toContain("if (state === 'REFERRAL_SUBMITTED') return ['acknowledge'];");
+    expect(hospitalUi).toContain("if (state === 'ACKNOWLEDGED') return ['accept', 'request_info', 'redirect'];");
+    expect(hospitalUi).toContain('Accept and confirm appointment');
+  });
+});
+
 describe('care access state machine', () => {
   it('permits the core request-to-referral path', () => {
     let version = 1;
@@ -42,7 +77,10 @@ describe('care access state machine', () => {
       ['acknowledge', 'hospital', 'ACKNOWLEDGED'],
       ['accept', 'hospital', 'ACCEPTED'],
       ['offer_slot', 'hospital', 'SLOT_OFFERED'],
-      ['book', 'patient', 'BOOKED'],
+      ['submit_referral', 'patient', 'REFERRAL_SUBMITTED'],
+      ['acknowledge', 'hospital', 'ACKNOWLEDGED'],
+      ['accept', 'hospital', 'ACCEPTED'],
+      ['confirm_booking', 'system', 'BOOKED'],
     ] as const) {
       const plan = planCareAccessTransition(state, {
         careRequestId: 'care-1', action, actor: actor as never, actorId: 'actor', actorRole: actor,
@@ -53,6 +91,26 @@ describe('care access state machine', () => {
       version += 1;
     }
     expect(state).toBe('BOOKED');
+  });
+
+  it('keeps an instant-slot request pending until hospital acceptance', () => {
+    const submitted = planCareAccessTransition('PATIENT_SELECTED', {
+      careRequestId: 'care-1', action: 'submit_referral', actor: 'patient', actorId: 'patient', actorRole: 'patient',
+      appointmentId: 'appointment-1', metadata: { slotType: 'instant' },
+    });
+    expect(submitted.to).toBe('REFERRAL_SUBMITTED');
+    expect(() => planCareAccessTransition('REFERRAL_SUBMITTED', {
+      careRequestId: 'care-1', action: 'book', actor: 'patient', actorId: 'patient', actorRole: 'patient',
+    })).toThrowError(CareAccessTransitionError);
+
+    const accepted = planCareAccessTransition(submitted.to, {
+      careRequestId: 'care-1', action: 'accept', actor: 'hospital', actorId: 'staff', actorRole: 'staff',
+    });
+    expect(accepted.to).toBe('ACCEPTED');
+    expect(planCareAccessTransition(accepted.to, {
+      careRequestId: 'care-1', action: 'confirm_booking', actor: 'system', actorId: 'system', actorRole: 'system',
+      appointmentId: 'appointment-1',
+    }).to).toBe('BOOKED');
   });
 
   it('rejects skipping from request to service completion', () => {
