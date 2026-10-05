@@ -11,9 +11,9 @@ export const dynamic = 'force-dynamic';
 /**
  * Appointment booking/request.
  *
- * Approval-required slots create a pending request. Instant slots are already
- * authorized by the hospital's published policy and return a confirmed
- * appointment. The response reports which branch actually happened.
+ * Every slot creates a pending request. An instant slot is a published
+ * availability signal, not a hospital confirmation; the response reports
+ * the appointment state that was actually persisted.
  *
  * The client sends a session id and nothing else that matters: department,
  * hospital and time are all read from the session server-side, so a tampered
@@ -108,11 +108,9 @@ export async function POST(req: NextRequest) {
     return ok(
       {
         appointment,
-        // Instant slots are pre-authorized by the hospital; approval-required
-        // slots remain requests until the hospital decides.
         confirmed: appointment.status === 'booked',
         notice: appointment.status === 'booked'
-          ? 'Booked. This instant slot was confirmed by the hospital\'s published booking policy.'
+          ? 'Confirmed. The hospital accepted this appointment request.'
           : 'Requested. The hospital has not confirmed this yet — wait for confirmation before travelling.',
       },
       { status: 201 },

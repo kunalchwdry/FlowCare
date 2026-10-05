@@ -30,13 +30,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     /* An appointment is still the booking/arrival source of truth. Care
        Access records the cross-provider journey, but these operational actions
        must pass through the existing appointment state machine first. */
-    if (current.appointmentId && ['arrive', 'complete', 'no_show', 'cancel'].includes(body.action)) {
+    if (current.appointmentId && ['accept', 'arrive', 'complete', 'no_show', 'cancel'].includes(body.action)) {
       let appointment = await repo.getAppointment(current.appointmentId);
       if (!appointment) return fail(409, 'The linked appointment is no longer available.');
       const move = async (action: Parameters<Repo['transitionAppointment']>[0]['action'], reason?: string) => {
-        appointment = await repo.transitionAppointment({ appointmentId: appointment!.id, action, actor: 'hospital', actorId: actor.user.id, actorRole: actor.user.role, permissions: actor.permissions, hospitalId: actor.hospitalId, reason: reason ?? null });
+        appointment = await repo.transitionAppointment({ appointmentId: appointment!.id, action, actor: 'hospital', actorId: actor.user.id, actorRole: actor.user.role, permissions: actor.permissions, hospitalId: actor.hospitalId, expectedVersion: appointment!.version, reason: reason ?? null });
       };
-      if (body.action === 'arrive') {
+      if (body.action === 'accept') {
+        if (appointment.status === 'requested') await move('accept');
+        if (appointment.status !== 'booked') return fail(409, 'The linked appointment is not ready to confirm.');
+      } else if (body.action === 'arrive') {
         if (appointment.status === 'requested') await move('accept');
         if (appointment.status === 'booked') await move('check_in');
         if (!['checked_in', 'in_progress'].includes(appointment.status)) return fail(409, 'The linked appointment is not ready to record arrival.');
@@ -53,11 +56,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       }
     }
 
-    const request = await repo.transitionCareRequest({
+    let request = await repo.transitionCareRequest({
       careRequestId: id, action: body.action, actor: 'hospital', actorId: actor.user.id, actorRole: actor.user.role,
       expectedVersion: body.expectedVersion ?? current.version, reason: body.reason ?? null, optionId: body.optionId ?? current.selectedOptionId,
       metadata: { hospitalId: actor.hospitalId, appointmentId: current.appointmentId },
     });
+
+    // Hospital acceptance has now confirmed the linked appointment. Only at
+    // this point may the Care Access journey become BOOKED.
+    if (body.action === 'accept' && request.appointmentId) {
+      const confirmed = await repo.getAppointment(request.appointmentId);
+      if (confirmed?.status === 'booked') {
+        request = await repo.transitionCareRequest({
+          careRequestId: id, action: 'confirm_booking', actor: 'system', actorId: actor.user.id, actorRole: 'system',
+          expectedVersion: request.version, optionId: request.selectedOptionId, appointmentId: confirmed.id,
+          metadata: { hospitalId: actor.hospitalId, patientId: request.patientId, confirmation: 'hospital_accepted' },
+        });
+      }
+    }
 
     if (body.action === 'complete' && request.episodeId) {
       await repo.createCareTask({ careRequestId: id, episodeId: request.episodeId, patientId: request.patientId,
