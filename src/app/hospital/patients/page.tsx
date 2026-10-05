@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { requireHospitalPermission } from '@/lib/auth/hospital';
 import { getRepo } from '@/lib/data';
 import { HospitalShell, Stat, StatusBadge } from '@/components/hospital/HospitalShell';
@@ -68,7 +69,7 @@ export default async function HospitalPatients() {
         </div>
       ) : (
         <div className="mt-4 overflow-x-auto rounded-xl border border-ink-200 bg-white">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[840px] text-left text-sm">
             <thead className="border-b border-ink-200 bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
               <tr>
                 <th className="px-4 py-2 font-semibold">Patient</th>
@@ -76,6 +77,7 @@ export default async function HospitalPatients() {
                 <th className="px-4 py-2 font-semibold">First</th>
                 <th className="px-4 py-2 font-semibold">Most recent</th>
                 <th className="px-4 py-2 font-semibold">Latest status</th>
+                <th className="px-4 py-2 font-semibold">Context</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
@@ -91,6 +93,14 @@ export default async function HospitalPatients() {
                   <td className="px-4 py-3 text-xs text-ink-500">{d(p.first)}</td>
                   <td className="px-4 py-3 text-xs text-ink-500">{d(p.last)}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.appointments.at(-1)!.status} /></td>
+                  <td className="px-4 py-3">
+                    <Link
+                      href={`/hospital/patients/${p.appointments.at(-1)!.id}`}
+                      className="text-xs font-semibold text-brand-700 hover:underline"
+                    >
+                      Reliability &amp; visits
+                    </Link>
+                  </td>
                 </tr>
               ))}
             </tbody>

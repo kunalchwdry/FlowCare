@@ -582,6 +582,12 @@ export function createSupabaseRepo(
       return [];
     },
 
+    async listPatientTraffic(hospitalIds, options) {
+      // The RPC is SECURITY DEFINER and applies the public/staff scope. Keep
+      // the mapping in liveRepo so both repository modes expose one shape.
+      return liveRepo.listPatientTraffic(hospitalIds, options);
+    },
+
     async listReviews(opts) {
       let q = client.from('hospital_reviews').select('*').order('created_at', { ascending: false });
       if (opts?.hospitalId) q = q.eq('hospital_id', opts.hospitalId);
@@ -595,6 +601,15 @@ export function createSupabaseRepo(
 
     async getAppointment(id: string) {
       return liveRepo.getAppointment(id);
+    },
+    async getPatientReliability(patientId: string) {
+      return liveRepo.getPatientReliability(patientId);
+    },
+    async listVerifiedVisits(patientId: string) {
+      return liveRepo.listVerifiedVisits(patientId);
+    },
+    async getHospitalPatientProfile(appointmentId: string, hospitalId?: string) {
+      return liveRepo.getHospitalPatientProfile(appointmentId, hospitalId);
     },
 
     /** Book against the live `slots` table through its SECURITY DEFINER RPC. */

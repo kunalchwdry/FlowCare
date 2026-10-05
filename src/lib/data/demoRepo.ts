@@ -23,6 +23,9 @@ import type {
   NewVisitRecord, Repo, TransitionInput,
 } from './repo';
 import { plan, TransitionError } from '@/lib/appointments/stateMachine';
+import { aggregateAppointmentTraffic } from '@/lib/traffic/traffic';
+import { deriveReliability } from '@/lib/reliability/derive';
+import type { HospitalPatientProfile, VerifiedVisit } from '@/lib/reliability/types';
 import { assertAdministrative } from '@/lib/journey/prep';
 import type {
   AccessibilityComponent, Appointment, CareContext, ClinicSession,
@@ -191,6 +194,37 @@ export const demoRepo: Repo = {
     return SEED.queues.filter((q) => set.has(q.hospitalId));
   },
 
+  /**
+   * Demo traffic is derived from the same appointment and queue rows used by
+   * the demo portal. It intentionally does not read SEED.queues: those are
+   * legacy synthetic discovery fixtures, not live traffic truth.
+   */
+  async listPatientTraffic(hospitalIds?: string[], options?: { detailed?: boolean }) {
+    const set = hospitalIds ? new Set(hospitalIds) : null;
+    const hospitals = SEED.hospitals.filter((h) => !set || set.has(h.id));
+    const allAppointments = [...SEED.appointments, ...load().appointments];
+    const allEvents = load().appointmentEvents;
+    const eventsByAppointment = new Map<string, AppointmentEvent[]>();
+    for (const event of allEvents) {
+      const list = eventsByAppointment.get(event.appointmentId) ?? [];
+      list.push(event);
+      eventsByAppointment.set(event.appointmentId, list);
+    }
+    const queueEntries = load().queueEntries;
+    return hospitals.map((hospital) => {
+      const names = new Map(hospital.departments.map((d) => [d.id, d.name]));
+      return aggregateAppointmentTraffic(
+        hospital.id,
+        allAppointments.filter((a) => a.hospitalId === hospital.id),
+        eventsByAppointment,
+        queueEntries.filter((q) => q.hospitalId === hospital.id),
+        new Date(),
+        names,
+        Boolean(options?.detailed),
+      );
+    });
+  },
+
   async listReviews(opts) {
     const s = load();
     let rows = s.reviews;
@@ -210,6 +244,44 @@ export const demoRepo: Repo = {
   async getAppointment(id: string): Promise<Appointment | null> {
     const found = [...SEED.appointments, ...load().appointments].find((a) => a.id === id);
     return found ? { ...found } : null;
+  },
+
+  async getPatientReliability(patientId) {
+    const appointments = [...SEED.appointments, ...load().appointments].filter((a) => a.patientId === patientId);
+    const events = load().appointmentEvents.filter((e) => appointments.some((a) => a.id === e.appointmentId));
+    return deriveReliability(appointments, events);
+  },
+
+  async listVerifiedVisits(patientId): Promise<VerifiedVisit[]> {
+    const hospitals = new Map(SEED.hospitals.map((h) => [h.id, h]));
+    return [...SEED.appointments, ...load().appointments]
+      .filter((a) => a.patientId === patientId && a.status === 'completed')
+      .map((a) => ({
+        appointmentId: a.id,
+        hospitalId: a.hospitalId,
+        hospitalName: hospitals.get(a.hospitalId)?.name ?? null,
+        departmentName: a.departmentName ?? hospitals.get(a.hospitalId)?.departments.find((d) => d.id === a.departmentId)?.name ?? null,
+        visitDate: a.completedAt ?? a.scheduledFor,
+        status: 'completed' as const,
+        appointmentKind: a.slotType ?? null,
+      }))
+      .sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+  },
+
+  async getHospitalPatientProfile(appointmentId, hospitalId?): Promise<HospitalPatientProfile | null> {
+    const all = [...SEED.appointments, ...load().appointments];
+    const relationship = all.find((a) => a.id === appointmentId);
+    if (!relationship || (hospitalId && relationship.hospitalId !== hospitalId)) return null;
+    const appointments = all.filter((a) => a.patientId === relationship.patientId);
+    const events = load().appointmentEvents.filter((e) => appointments.some((a) => a.id === e.appointmentId));
+    const { pointHistory: _pointHistory, ...reliability } = deriveReliability(appointments, events);
+    return {
+      patientId: relationship.patientId,
+      reliability,
+      recentVisits: (await demoRepo.listVerifiedVisits(relationship.patientId))
+        .filter((visit) => visit.hospitalId === relationship.hospitalId)
+        .slice(0, 5),
+    };
   },
 
   /**
@@ -239,7 +311,9 @@ export const demoRepo: Repo = {
       departmentId: session.departmentId,
       sessionId: session.id,
       scheduledFor: `${session.date}T${session.startTime}:00`,
-      status: session.slotType === 'instant' ? 'booked' : 'requested',
+      // A patient request is never a confirmed appointment. The hospital's
+      // accept transition is the only path to booked/confirmed.
+      status: 'requested',
       slotType: session.slotType ?? 'approval_required',
       queueId: formatQueueId(new Date().getFullYear(), session.departmentId, Math.floor(100000 + Math.random() * 900000)),
       approvalStatus: session.slotType === 'instant' ? 'not_required' : 'pending',
@@ -255,7 +329,7 @@ export const demoRepo: Repo = {
     s.appointments.push(appointment);
     s.queueEntries.push({ id: uid('queue'), queueId: appointment.queueId!, careRequestId: null, appointmentId: appointment.id,
       patientId: appointment.patientId, hospitalId: appointment.hospitalId, departmentId: appointment.departmentId, providerId: session.providerId ?? null,
-      slotId: session.id, queueType: 'appointment', status: session.slotType === 'instant' ? 'booked' : 'approval_pending', position: null,
+      slotId: session.id, queueType: 'appointment', status: 'approval_pending', position: null,
       estimatedSlotAt: appointment.scheduledFor, lastUpdatedAt: appointment.requestedAt!, createdAt: appointment.requestedAt! });
     save();
     /*
@@ -498,11 +572,11 @@ export const demoRepo: Repo = {
         ? new Date(Date.now() + (row.approvalResponseWindowMinutes ?? 240) * 60_000).toISOString() : null;
       row.recoveryPolicy = 'offer_alternatives';
     }
-    if (decided.action === 'book' && row.selectedOptionId && !selectedOption) {
+    if (['book', 'submit_referral', 'confirm_booking'].includes(decided.action) && row.selectedOptionId && !selectedOption) {
       selectedOption = s.careOptions.find((o) => o.id === row.selectedOptionId && o.careRequestId === row.id) ?? null;
       if (selectedOption) row.slotType = selectedOption.slotType ?? 'approval_required';
     }
-    if (decided.action === 'book' && input.appointmentId) row.appointmentId = input.appointmentId;
+    if (['book', 'submit_referral', 'confirm_booking'].includes(decided.action) && input.appointmentId) row.appointmentId = input.appointmentId;
     if (['request_approval', 'join_waitlist', 'rebook'].includes(decided.action) && selectedOption && !row.queueId) {
       const session = SEED.sessions.find((x) => x.id === selectedOption?.sessionId);
       const prefix = (session?.departmentId ?? 'CARE').replace(/[^A-Za-z0-9]/g, '').slice(0, 8).toUpperCase() || 'CARE';

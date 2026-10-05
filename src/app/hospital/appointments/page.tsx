@@ -151,6 +151,12 @@ export default async function HospitalAppointments({
                     <p className="font-semibold text-ink-900">
                       {a.patientName || <span className="text-ink-400">Name not given</span>}
                     </p>
+                    <Link
+                      href={`/hospital/patients/${a.id}`}
+                      className="mt-1 inline-block text-[11px] font-semibold text-brand-700 hover:underline"
+                    >
+                      Reliability &amp; visits
+                    </Link>
                     {a.reason && (
                       <p className="mt-0.5 max-w-xs text-xs text-ink-500">“{a.reason}”</p>
                     )}

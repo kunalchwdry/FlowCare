@@ -23,6 +23,9 @@
  */
 import { demoRepo } from './demoRepo';
 import type { NewAppointmentMessage, Repo } from './repo';
+import type { HospitalPatientProfile, PatientReliability, ReliabilityEvent, VerifiedVisit } from '@/lib/reliability/types';
+import { RELIABILITY_RULES, reliabilityStatus } from '@/lib/reliability/types';
+import { deriveReliability } from '@/lib/reliability/derive';
 import type {
   Appointment, AppointmentMessage,
   ClinicSession, Hospital, HospitalDepartment, HospitalService, HospitalType,
@@ -31,6 +34,7 @@ import type {
 const URL_BASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 import { getSupabaseAdminClient, getSupabaseServerClient } from '@/lib/supabase/server';
 import { clockTime, zonedDateKey } from '@/lib/time';
+import { snapshotFromCounts, type PatientTrafficSnapshot, type TrafficDepartmentBreakdown, type TrafficProviderBreakdown } from '@/lib/traffic/traffic';
 import {
   fromDbStatus, idempotencyKey, isPersistable, toDbAction,
 } from '@/lib/appointments/dbVocabulary';
@@ -258,6 +262,149 @@ function mapDbAppointment(r: Row, departmentName?: string): Appointment {
   };
 }
 
+function reliabilityMigrationMissing(error: unknown): boolean {
+  const message = String((error as { message?: string } | null)?.message ?? error ?? '');
+  return /PGRST202|could not find the function|function .* does not exist|patient_reliability/i.test(message);
+}
+
+function mapReliability(raw: Row | null | undefined, includeHistory = true): PatientReliability {
+  const score = Math.max(0, Math.min(100, Number(raw?.score ?? RELIABILITY_RULES.startingScore)));
+  const history: ReliabilityEvent[] = Array.isArray(raw?.pointHistory) && includeHistory
+    ? raw.pointHistory.map((e: Row) => ({
+      id: String(e.id), appointmentId: String(e.appointmentId), type: e.type,
+      pointsDelta: Number(e.pointsDelta), occurredAt: String(e.occurredAt),
+    }))
+    : [];
+  return {
+    score,
+    updatedAt: raw?.updatedAt == null ? null : String(raw.updatedAt),
+    status: reliabilityStatus(score),
+    completedCount: Number(raw?.completedCount ?? 0),
+    cancelledCount: Number(raw?.cancelledCount ?? 0),
+    lateCancellationCount: Number(raw?.lateCancellationCount ?? 0),
+    noShowCount: Number(raw?.noShowCount ?? 0),
+    pointHistory: history,
+  };
+}
+
+function mapVerifiedVisit(raw: Row): VerifiedVisit {
+  return {
+    appointmentId: String(raw.appointmentId),
+    hospitalId: String(raw.hospitalId),
+    hospitalName: raw.hospitalName == null ? null : String(raw.hospitalName),
+    departmentName: raw.departmentName == null ? null : String(raw.departmentName),
+    visitDate: String(raw.visitDate),
+    status: 'completed',
+    appointmentKind: raw.appointmentKind == null ? null : String(raw.appointmentKind),
+  };
+}
+
+function mapHospitalPatientProfile(raw: Row | null | undefined): HospitalPatientProfile | null {
+  if (!raw?.patientId) return null;
+  const { pointHistory: _pointHistory, ...reliability } = mapReliability(raw.reliability, false);
+  return {
+    patientId: String(raw.patientId),
+    reliability,
+    recentVisits: Array.isArray(raw.recentVisits) ? raw.recentVisits.map(mapVerifiedVisit) : [],
+  };
+}
+
+async function markCompletedFromVisits(sb: any, appointments: Appointment[]): Promise<Appointment[]> {
+  if (!appointments.length) return appointments;
+  const { data, error } = await sb
+    .from('visits')
+    .select('appointment_id, state')
+    .in('appointment_id', appointments.map((appointment) => appointment.id));
+  if (error) throw new Error(`supabase: ${error.message}`);
+  const completedIds = new Set(
+    (data ?? []).filter((row: Row) => String(row.state) === 'completed').map((row: Row) => String(row.appointment_id)),
+  );
+  return appointments.map((appointment) => completedIds.has(appointment.id)
+    ? { ...appointment, status: 'completed' as const }
+    : appointment);
+}
+
+async function deriveLiveReliabilityFallback(sb: any, patientId: string): Promise<PatientReliability> {
+  const appointments = await markCompletedFromVisits(sb, await liveRepo.listAppointments({ patientId }));
+  const eventLists = await Promise.all(appointments.map((appointment) => liveRepo.listAppointmentEvents(appointment.id)));
+  return deriveReliability(appointments, eventLists.flat());
+}
+
+async function deriveLiveVisitHistoryFallback(sb: any, patientId: string): Promise<VerifiedVisit[]> {
+  const [rawAppointments, hospitals] = await Promise.all([
+    liveRepo.listAppointments({ patientId }),
+    liveRepo.listHospitals(),
+  ]);
+  const appointments = await markCompletedFromVisits(sb, rawAppointments);
+  const hospitalById = new Map(hospitals.map((hospital) => [hospital.id, hospital]));
+  const eventLists = await Promise.all(appointments.map((appointment) => liveRepo.listAppointmentEvents(appointment.id)));
+  const eventsByAppointment = new Map(appointments.map((appointment, index) => [appointment.id, eventLists[index]]));
+
+  return appointments
+    .filter((appointment) => appointment.status === 'completed')
+    .map((appointment) => {
+      const hospital = hospitalById.get(appointment.hospitalId);
+      const completedEvent = (eventsByAppointment.get(appointment.id) ?? []).find((event) => event.action === 'complete');
+      return {
+        appointmentId: appointment.id,
+        hospitalId: appointment.hospitalId,
+        hospitalName: hospital?.name ?? null,
+        departmentName: appointment.departmentName ?? hospital?.departments.find((department) => department.id === appointment.departmentId)?.name ?? null,
+        visitDate: completedEvent?.createdAt ?? appointment.completedAt ?? appointment.scheduledFor,
+        status: 'completed' as const,
+        appointmentKind: appointment.slotType ?? null,
+      };
+    })
+    .sort((a, b) => b.visitDate.localeCompare(a.visitDate));
+}
+
+function applyOperationalEvent(appointment: Appointment, events: Row[]): Appointment {
+  if (appointment.status !== 'booked') return appointment;
+  const latest = events
+    .slice()
+    .sort((a, b) => Number(a.version ?? 0) - Number(b.version ?? 0) || String(a.occurred_at ?? '').localeCompare(String(b.occurred_at ?? '')))
+    .at(-1);
+  const action = String(latest?.action ?? '');
+  const status = action === 'check_in' ? 'checked_in'
+    : action === 'start' ? 'in_progress'
+    : action === 'complete' ? 'completed'
+    : action === 'cancel' ? 'cancelled'
+    : action === 'no_show' ? 'no_show'
+    : appointment.status;
+  return status === appointment.status ? appointment : { ...appointment, status };
+}
+
+function mapPatientTraffic(r: Row): PatientTrafficSnapshot {
+  const details = Array.isArray(r.by_department) ? r.by_department : [];
+  const byDepartment: TrafficDepartmentBreakdown[] = details.map((d: Row) => ({
+    departmentId: String(d.departmentId ?? d.department_id ?? ''),
+    departmentName: d.departmentName ?? d.department_name ?? null,
+    waitingCount: Number(d.waitingCount ?? d.waiting_count ?? 0),
+    inConsultationCount: Number(d.inConsultationCount ?? d.in_consultation_count ?? 0),
+    completedToday: Number(d.completedToday ?? d.completed_today ?? 0),
+  })).filter((d) => d.departmentId);
+  const providerDetails = Array.isArray(r.by_provider) ? r.by_provider : [];
+  const byProvider: TrafficProviderBreakdown[] = providerDetails.map((p: Row) => ({
+    providerId: String(p.providerId ?? p.provider_id ?? ''),
+    providerName: p.providerName ?? p.provider_name ?? null,
+    waitingCount: Number(p.waitingCount ?? p.waiting_count ?? 0),
+    inConsultationCount: Number(p.inConsultationCount ?? p.in_consultation_count ?? 0),
+    completedToday: Number(p.completedToday ?? p.completed_today ?? 0),
+  })).filter((p) => p.providerId);
+  return snapshotFromCounts({
+    hospitalId: String(r.hospital_id),
+    available: Boolean(r.available),
+    waitingCount: Number(r.waiting_count ?? 0),
+    inConsultationCount: Number(r.in_consultation_count ?? 0),
+    completedToday: Number(r.completed_today ?? 0),
+    estimatedWaitMinutes: r.estimated_wait_minutes == null ? null : Number(r.estimated_wait_minutes),
+    updatedAt: r.updated_at ? String(r.updated_at) : null,
+    freshness: r.freshness === 'stale' ? 'stale' : r.freshness === 'fresh' ? 'fresh' : 'unavailable',
+    byDepartment,
+    byProvider,
+  });
+}
+
 function mapDbMessage(r: Row): AppointmentMessage {
   return {
     id: String(r.id),
@@ -379,12 +526,31 @@ export const liveRepo: Repo = {
     if (patientId) qb = qb.eq('patient_id', patientId);
     if (hospitalId) qb = qb.eq('hospital_id', hospitalId);
     const { data, error } = await qb;
-    if (error || !data) return [];
+    if (error) throw new Error(`supabase: ${error.message}`);
+    if (!data) throw new Error('supabase: appointments query returned no data');
     const names = await departmentNames();
-    const rows = await hydrateAppointmentTimes(
+    let rows = await hydrateAppointmentTimes(
       sb,
       data.map((r) => mapDbAppointment(r as Row, names.get(String((r as Row).department_id)))),
     );
+    // The live core persists check-in/start as appointment_events while the
+    // row remains `confirmed`. Read the event trail in one query so portal
+    // status and traffic agree without an N+1 event lookup.
+    if (rows.length > 0) {
+      const { data: eventRows, error: eventError } = await sb
+        .from('appointment_events')
+        .select('appointment_id, action, version, occurred_at')
+        .in('appointment_id', rows.map((a) => a.id))
+        .order('version', { ascending: true });
+      if (eventError) throw new Error(`supabase: ${eventError.message}`);
+      const byAppointment = new Map<string, Row[]>();
+      for (const event of (eventRows ?? []) as Row[]) {
+        const list = byAppointment.get(String(event.appointment_id)) ?? [];
+        list.push(event);
+        byAppointment.set(String(event.appointment_id), list);
+      }
+      rows = rows.map((a) => applyOperationalEvent(a, byAppointment.get(a.id) ?? []));
+    }
     const proposals = await Promise.all(rows.map((a) => pendingProposal(sb, a.id)));
     return rows.map((a, i) => applyPendingProposal(a, proposals[i]));
   },
@@ -393,13 +559,75 @@ export const liveRepo: Repo = {
     const sb = await getSupabaseServerClient();
     if (!sb) return null;
     const { data, error } = await sb.from('appointments').select('*').eq('id', id).maybeSingle();
-    if (error || !data) return null;
+    if (error) throw new Error(`supabase: ${error.message}`);
+    if (!data) return null;
     const names = await departmentNames();
-    const appointment = (await hydrateAppointmentTimes(
+    let appointment = (await hydrateAppointmentTimes(
       sb,
       [mapDbAppointment(data as Row, names.get(String((data as Row).department_id)))],
     ))[0];
+    const { data: eventRows, error: eventError } = await sb
+      .from('appointment_events')
+      .select('appointment_id, action, version, occurred_at')
+      .eq('appointment_id', appointment.id)
+      .order('version', { ascending: true });
+    if (eventError) throw new Error(`supabase: ${eventError.message}`);
+    appointment = applyOperationalEvent(appointment, (eventRows ?? []) as Row[]);
     return applyPendingProposal(appointment, await pendingProposal(sb, appointment.id));
+  },
+
+  async getPatientReliability(patientId): Promise<PatientReliability> {
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('SUPABASE_UNAVAILABLE');
+    const { data, error } = await sb.rpc('get_patient_reliability', { p_patient: patientId });
+    if (error) {
+      // The migration is additive and may be deployed after the application.
+      // Until then, derive from the existing RLS-scoped appointment/event
+      // source of truth rather than hiding real history behind an empty card.
+      if (reliabilityMigrationMissing(error)) return deriveLiveReliabilityFallback(sb, patientId);
+      throw new Error(`supabase: ${error.message}`);
+    }
+    const payload = (Array.isArray(data) ? data[0] : data) as Row | null | undefined;
+    if (!payload || typeof payload !== 'object') throw new Error('supabase: reliability RPC returned an invalid payload');
+    return mapReliability(payload);
+  },
+
+  async listVerifiedVisits(patientId): Promise<VerifiedVisit[]> {
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('SUPABASE_UNAVAILABLE');
+    const { data, error } = await sb.rpc('get_patient_visit_history', { p_patient: patientId });
+    if (error) {
+      if (reliabilityMigrationMissing(error)) return deriveLiveVisitHistoryFallback(sb, patientId);
+      throw new Error(`supabase: ${error.message}`);
+    }
+    if (!Array.isArray(data)) throw new Error('supabase: visit history RPC returned an invalid payload');
+    const rows = data;
+    return rows.map((row) => mapVerifiedVisit(row as Row));
+  },
+
+  async getHospitalPatientProfile(appointmentId, hospitalId?): Promise<HospitalPatientProfile | null> {
+    const sb = await getSupabaseServerClient();
+    if (!sb) throw new Error('SUPABASE_UNAVAILABLE');
+    const { data, error } = await sb.rpc('get_hospital_patient_profile', { p_appointment: appointmentId });
+    if (error) {
+      if (reliabilityMigrationMissing(error)) {
+        const relationship = await liveRepo.getAppointment(appointmentId);
+        if (!relationship || (hospitalId && relationship.hospitalId !== hospitalId)) return null;
+        const [fullReliability, visits] = await Promise.all([
+          deriveLiveReliabilityFallback(sb, relationship.patientId),
+          deriveLiveVisitHistoryFallback(sb, relationship.patientId),
+        ]);
+        const { pointHistory: _pointHistory, ...reliability } = fullReliability;
+        return {
+          patientId: relationship.patientId,
+          reliability,
+          recentVisits: visits.filter((visit) => visit.hospitalId === relationship.hospitalId).slice(0, 5),
+        };
+      }
+      if (/NOT_FOUND|permission|row-level security/i.test(String(error.message))) return null;
+      throw new Error(`supabase: ${error.message}`);
+    }
+    return mapHospitalPatientProfile((Array.isArray(data) ? data[0] : data) as Row);
   },
 
   /** Hospital and patient decisions, including the explicit time-proposal loop. */
@@ -585,6 +813,24 @@ export const liveRepo: Repo = {
   /** No queue snapshots exist in the live project; report none rather than invent one. */
   async listQueues() {
     return [];
+  },
+
+  /**
+   * One aggregate RPC serves every public card. A hospital-specific call is
+   * still filtered by the database function, which only returns department
+   * details to that hospital's queue reader.
+   */
+  async listPatientTraffic(hospitalIds?: string[], _options?: { detailed?: boolean }) {
+    const sb = await getSupabaseServerClient();
+    if (!sb) return [];
+    const { data, error } = await sb.rpc('list_patient_traffic', {
+      p_hospital: hospitalIds?.length === 1 ? hospitalIds[0] : null,
+    });
+    if (error || !Array.isArray(data)) return [];
+    const wanted = hospitalIds ? new Set(hospitalIds) : null;
+    return (data as Row[])
+      .map(mapPatientTraffic)
+      .filter((traffic) => !wanted || wanted.has(traffic.hospitalId));
   },
 
   /** `hospital_reviews` is empty live. Returning [] makes the UI say so honestly. */
