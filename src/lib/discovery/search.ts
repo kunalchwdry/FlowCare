@@ -94,10 +94,9 @@ export async function searchHospitals(
   const now = deps.now ?? new Date();
   const { repo } = deps;
 
-  const [hospitals, sessions, queues, reviews] = await Promise.all([
+  const [hospitals, sessions, reviews] = await Promise.all([
     repo.listHospitals(),
     repo.listSessions(),
-    repo.listQueues(),
     repo.listReviews({ includeNonPublished: false }),
   ]);
 
@@ -285,7 +284,9 @@ export async function searchHospitals(
       hospital,
       distanceKm,
       availability: availabilityById.get(hospital.id)!,
-      queue: queues.find((q) => q.hospitalId === hospital.id) ?? null,
+      // Legacy published queue snapshots are not Patient Traffic and are
+      // intentionally not included in public discovery responses.
+      queue: null,
       flowcareRating: ratings[hospital.id],
       external: {
         linked: Boolean(placeId),
@@ -342,10 +343,10 @@ export async function loadHospitalDetail(
   const hospital = await deps.repo.getHospital(idOrSlug);
   if (!hospital) return null;
 
-  const [sessions, queues, reviews] = await Promise.all([
+  const [sessions, reviews, traffic] = await Promise.all([
     deps.repo.listSessions([hospital.id]),
-    deps.repo.listQueues([hospital.id]),
     deps.repo.listReviews({ includeNonPublished: false }),
+    deps.repo.listPatientTraffic([hospital.id]),
   ]);
 
   const ratings = aggregateAll([hospital.id], reviews, now);
@@ -368,7 +369,8 @@ export async function loadHospitalDetail(
     hospital,
     distanceKm: null,
     availability: computeAvailability(hospital.id, sessions, now),
-    queue: queues[0] ?? null,
+    queue: null,
+    traffic: traffic[0] ?? undefined,
     flowcareRating: ratings[hospital.id],
     external: { linked: Boolean(placeId), placeId, data, status },
   };

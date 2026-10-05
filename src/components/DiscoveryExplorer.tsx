@@ -91,6 +91,36 @@ export function DiscoveryExplorer({ initialView = 'list' }: { initialView?: View
 
   useEffect(() => { void runSearch(); }, [runSearch]);
 
+  // There is no Realtime subscription in the existing client architecture.
+  // Refresh one aggregate batch every minute instead of issuing one request
+  // per card; the initial search already carries the first snapshot.
+  const trafficIds = useMemo(
+    () => (data?.results ?? []).map((r) => r.hospital.id).join(','),
+    [data?.results],
+  );
+  useEffect(() => {
+    if (!trafficIds) return;
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const res = await fetch(`/api/patient-traffic?hospitalIds=${encodeURIComponent(trafficIds)}`, { cache: 'no-store' });
+        const json = await res.json();
+        const next = (Array.isArray(json?.data?.traffic) ? json.data.traffic : []) as Array<NonNullable<ResultWithEvidence['traffic']>>;
+        const byHospital = new Map(next.map((t) => [t.hospitalId, t] as const));
+        if (!disposed) {
+          setData((previous) => previous ? {
+            ...previous,
+            results: previous.results.map((r) => ({ ...r, traffic: byHospital.get(r.hospital.id) })),
+          } : previous);
+        }
+      } catch {
+        // Keep the last snapshot and let its updated time remain visible.
+      }
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [trafficIds]);
+
   // Keep the URL shareable without re-triggering a fetch loop.
   useEffect(() => {
     const params = filtersToSearchParams({ ...filters, q: query || undefined } as Partial<DiscoveryFilters>);
