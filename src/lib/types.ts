@@ -1,5 +1,7 @@
 /** Shared domain types for the FlowCare discovery layer. */
 
+import type { PatientTrafficSnapshot } from '@/lib/traffic/traffic';
+
 export type HospitalType =
   | 'multispecialty'
   | 'specialty'
@@ -192,6 +194,8 @@ export interface DiscoveryResult {
   distanceKm: number | null;
   availability: HospitalAvailability;
   queue: QueueSnapshot | null;
+  /** Appointment-derived aggregate; never individual patient information. */
+  traffic?: PatientTrafficSnapshot;
   flowcareRating: FlowCareRatingSummary;
   external: {
     linked: boolean;

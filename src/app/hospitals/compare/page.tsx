@@ -68,10 +68,10 @@ function CompareInner() {
         ? <GoogleRating rating={r.external.data.rating} count={r.external.data.userRatingCount} uri={r.external.data.googleMapsUri} />
         : <span className="text-xs text-ink-400">{r.external.linked ? 'Not retrieved' : 'No Google Place linked'}</span>
     ) },
-    { k: 'Waiting information', source: 'flowcare', render: (r) => (
-      r.queue?.published && r.queue.medianWaitMinutes !== null
-        ? `~${r.queue.medianWaitMinutes} min median · ${r.queue.waitingCount} waiting`
-        : 'Not published by this hospital'
+    { k: 'Patient traffic', source: 'flowcare', render: (r) => (
+      r.traffic?.available
+        ? `${r.traffic.trafficLevel} · ${r.traffic.waitingCount} waiting · ${r.traffic.estimatedWaitMinutes === null ? 'wait time unavailable' : `~${r.traffic.estimatedWaitMinutes} min estimated wait`}`
+        : 'Traffic unavailable'
     ) },
     { k: 'Departments', source: 'flowcare', render: (r) => (
       <div className="flex flex-wrap gap-1">

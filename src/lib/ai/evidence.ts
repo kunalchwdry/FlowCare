@@ -63,12 +63,12 @@ export function buildEvidence(r: DiscoveryResult, filters: DiscoveryFilters): Ev
       : `${fr.score.toFixed(1)} FlowCare rating from ${fr.reviewCount} verified visits`,
   });
 
-  if (r.queue?.published && r.queue.medianWaitMinutes !== null) {
-    out.push({
-      kind: 'flowcare',
-      text: `Hospital publishes queue info: about ${r.queue.medianWaitMinutes} min median wait, ${r.queue.waitingCount} waiting (as of ${r.queue.observedAt ? formatTime(r.queue.observedAt) : 'unknown'})`,
-    });
-  }
+  out.push({
+    kind: 'flowcare',
+    text: r.traffic?.available
+      ? `Patient traffic is ${r.traffic.trafficLevel}: ${r.traffic.waitingCount} waiting (updated ${r.traffic.updatedAt ? formatTime(r.traffic.updatedAt) : 'just now'})`
+      : 'Patient traffic unavailable — FlowCare has no current appointment traffic data for this hospital',
+  });
 
   return out;
 }

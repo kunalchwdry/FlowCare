@@ -15,11 +15,12 @@ import {
 } from './FacilityFacts';
 import { CorrectionDialog } from './CorrectionDialog';
 import { TravelPanel } from './TravelPanel';
+import { PatientTrafficPanel } from './PatientTraffic';
 import type { FacilityFactsView } from '@/lib/journey/factsView';
 import { label } from '@/lib/discovery/filters';
 import { pushRecentlyViewed, trackEvent, useCompareBasket, useSessionId } from '@/lib/client/hooks';
 import type { DiscoveryResult, HospitalReview, FlowCareRatingSummary } from '@/lib/types';
-import { formatDate, formatDateTime, formatTime } from '@/lib/time';
+import { formatDate, formatDateTime } from '@/lib/time';
 
 interface Detail extends Omit<DiscoveryResult, 'match'> {
   ratingExplanation: string;
@@ -186,6 +187,9 @@ export function HospitalProfile({ id }: { id: string }) {
           </Link>
         </div>
         {saveMsg && <p className="mt-2 text-xs font-medium text-amber-700">{saveMsg}</p>}
+        <div className="mt-4">
+          <PatientTrafficPanel traffic={d.traffic} hospitalId={h.id} autoRefresh />
+        </div>
       </header>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
@@ -209,11 +213,11 @@ export function HospitalProfile({ id }: { id: string }) {
               <Stat title="Earliest bookable date" value={d.availability.nextAvailableDate ?? 'None in the window'} />
               <Stat title="Operational status" value={h.flowcareVerified ? 'Onboarded and operating on FlowCare' : 'Onboarding in progress — bookings may be limited'} />
               <Stat
-                title="Queue information"
+                title="Patient traffic"
                 value={
-                  d.queue?.published && d.queue.medianWaitMinutes !== null
-                    ? `~${d.queue.medianWaitMinutes} min median wait · ${d.queue.waitingCount} waiting (as of ${d.queue.observedAt ? formatTime(d.queue.observedAt) : 'unknown'})`
-                    : 'This hospital does not publish live queue information'
+                  d.traffic?.available
+                    ? `${d.traffic.trafficLevel} · ${d.traffic.waitingCount} waiting · ${d.traffic.estimatedWaitMinutes === null ? 'wait time unavailable' : `~${d.traffic.estimatedWaitMinutes} min estimated wait`}`
+                    : 'Traffic unavailable — no current appointment data'
                 }
               />
             </div>

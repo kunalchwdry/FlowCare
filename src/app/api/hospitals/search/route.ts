@@ -25,6 +25,9 @@ export async function GET(req: NextRequest) {
       fetchExternal: makeExternalFetcher(),
       skipExternal: !wantExternal,
     });
+    // One aggregate read for the page, never one appointment query per card.
+    const traffic = await repo.listPatientTraffic(outcome.results.map((r) => r.hospital.id));
+    const trafficByHospital = new Map(traffic.map((t) => [t.hospitalId, t]));
 
     const sessionId = req.headers.get('x-flowcare-session') ?? 'anon';
     track('search_performed', sessionId, { ...filterFingerprint(filters), result_count: outcome.total });
@@ -32,7 +35,11 @@ export async function GET(req: NextRequest) {
 
     return ok({
       ...outcome,
-      results: outcome.results.map((r) => ({ ...r, evidence: buildEvidence(r, filters) })),
+      results: outcome.results.map((r) => ({
+        ...r,
+        traffic: trafficByHospital.get(r.hospital.id) ?? undefined,
+        evidence: buildEvidence(r, filters),
+      })),
       appliedFilters: filters,
     });
   } catch (e) {

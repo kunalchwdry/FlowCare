@@ -5,6 +5,7 @@ import { computeMetrics } from '@/lib/hospital/metrics';
 import { HospitalShell, Stat, NoData } from '@/components/hospital/HospitalShell';
 import { PendingState } from '@/components/hospital/PendingState';
 import { formatDate } from '@/lib/time';
+import { PatientTrafficPanel } from '@/components/PatientTraffic';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,11 +17,13 @@ export default async function HospitalDashboard() {
   const { actor } = gate;
 
   const repo = await getRepo();
-  const [hospital, appointments, sessions] = await Promise.all([
+  const [hospital, appointments, sessions, trafficRows] = await Promise.all([
     repo.getHospital(actor.hospitalId),
     repo.listAppointments({ hospitalId: actor.hospitalId }),
     repo.listSessions([actor.hospitalId]),
+    repo.listPatientTraffic([actor.hospitalId], { detailed: true }),
   ]);
+  const traffic = trafficRows[0];
   const activeDepartmentCount = hospital?.departments.filter((d) => d.active).length ?? 0;
   const openSlotCount = sessions.filter((s) => s.status === 'open' && s.capacity > s.booked).length;
   const needsSupplySetup = activeDepartmentCount === 0 || openSlotCount === 0;
@@ -51,6 +54,10 @@ export default async function HospitalDashboard() {
     >
       {/* Attention panel first: a dashboard that is only informational wastes
           the one glance a receptionist gives it. */}
+      <div className="mb-5">
+        <PatientTrafficPanel traffic={traffic} hospitalId={actor.hospitalId} detailed autoRefresh hospitalPortal />
+      </div>
+
       {needsAction > 0 ? (
         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <p className="text-sm font-bold text-amber-900">Waiting on you</p>

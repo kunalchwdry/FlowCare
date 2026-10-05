@@ -247,6 +247,12 @@ export async function POST(req: NextRequest) {
       fetchExternal: makeExternalFetcher(),
       preference,
     });
+    const traffic = await repo.listPatientTraffic(outcome.results.map((r) => r.hospital.id));
+    const trafficByHospital = new Map(traffic.map((t) => [t.hospitalId, t]));
+    const resultsWithTraffic = outcome.results.map((r) => ({
+      ...r,
+      traffic: trafficByHospital.get(r.hospital.id),
+    }));
 
     track('assistant_query', req.headers.get('x-flowcare-session') ?? 'anon', {
       provider: intent.provider ?? 'none',
@@ -284,7 +290,7 @@ export async function POST(req: NextRequest) {
       safetyNotice: intent.emergencySignal ? EMERGENCY_NOTICE : null,
       scopeNotice: SCOPE_NOTICE,
       locationNotice,
-      results: outcome.results.map((r) => ({ ...r, evidence: buildEvidence(r, filters) })),
+      results: resultsWithTraffic.map((r) => ({ ...r, evidence: buildEvidence(r, filters) })),
       total: outcome.total,
       emptyReason: outcome.emptyReason,
       computedAt: outcome.computedAt,

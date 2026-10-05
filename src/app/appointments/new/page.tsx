@@ -5,6 +5,7 @@ import { label } from '@/lib/discovery/filters';
 import { getSession } from '@/lib/auth/session';
 import { SlotPicker } from '@/components/SlotPicker';
 import { formatDateTime } from '@/lib/time';
+import { PatientTrafficPanel } from '@/components/PatientTraffic';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,11 @@ export default async function NewAppointmentPage({
     );
   }
 
-  const sessions = await repo.listSessions([hospital.id]);
+  const [sessions, trafficRows] = await Promise.all([
+    repo.listSessions([hospital.id]),
+    repo.listPatientTraffic([hospital.id]),
+  ]);
+  const traffic = trafficRows[0];
   const availability = computeAvailability(hospital.id, sessions);
   const depts = hospital.departments.filter((d) => d.active);
   const todayKey = availability.computedAt.slice(0, 10);
@@ -74,9 +79,12 @@ export default async function NewAppointmentPage({
           {noDepartments
             ? 'No appointment request has been sent yet. This hospital has not published a department or appointment slot in FlowCare.'
             : hasInstantSlots
-              ? 'Instant slots are confirmed immediately when booked. Approval-required slots remain requests until the hospital confirms them.'
+              ? 'Published slots are requests until the hospital confirms them. Approval-required slots follow the same hospital confirmation process.'
               : 'You are asking the hospital for a slot. It is a request until the hospital confirms it — FlowCare cannot confirm an appointment on a hospital\'s behalf.'}
         </p>
+        <div className="mt-4">
+          <PatientTrafficPanel traffic={traffic} hospitalId={hospital.id} autoRefresh />
+        </div>
       </header>
 
       {noDepartments ? (

@@ -5,6 +5,7 @@ import { PendingState, NoPermission } from '@/components/hospital/PendingState';
 import { AppointmentActions } from '@/components/hospital/AppointmentActions';
 import { todaysQueue } from '@/lib/hospital/portalData';
 import { formatTime } from '@/lib/time';
+import { PatientTrafficPanel } from '@/components/PatientTraffic';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Queue — FlowCare hospital portal' };
@@ -29,12 +30,14 @@ export default async function HospitalQueue() {
 
   const { actor } = gate;
   const repo = await getRepo();
-  const [hospital, all, sessions] = await Promise.all([
+  const [hospital, all, sessions, trafficRows] = await Promise.all([
     repo.getHospital(actor.hospitalId),
     repo.listAppointments({ hospitalId: actor.hospitalId }),
     repo.listSessions([actor.hospitalId]),
+    repo.listPatientTraffic([actor.hospitalId], { detailed: true }),
   ]);
 
+  const traffic = trafficRows[0];
   const queue = todaysQueue(all);
   const waiting = queue.filter((a) => a.status === 'booked' || a.status === 'checked_in');
   const inRoom = queue.filter((a) => a.status === 'in_progress');
@@ -59,10 +62,12 @@ export default async function HospitalQueue() {
       title="Queue"
       subtitle="Today only. Confirmed appointments appear here as the day runs."
     >
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Expected / waiting" value={waiting.length} tone={waiting.length ? 'warn' : 'default'} />
-        <Stat label="In consultation" value={inRoom.length} tone={inRoom.length ? 'good' : 'default'} />
-        <Stat label="Completed today" value={doneToday.length} />
+      <PatientTrafficPanel traffic={traffic} hospitalId={actor.hospitalId} detailed autoRefresh hospitalPortal />
+
+      <section className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Expected / waiting" value={traffic && traffic.available && traffic.waitingCount !== null ? traffic.waitingCount : 'Unavailable'} tone={traffic?.waitingCount ? 'warn' : 'default'} />
+        <Stat label="In consultation" value={traffic && traffic.available && traffic.inConsultationCount !== null ? traffic.inConsultationCount : 'Unavailable'} tone={traffic?.inConsultationCount ? 'good' : 'default'} />
+        <Stat label="Completed today" value={traffic && traffic.available && traffic.completedToday !== null ? traffic.completedToday : 'Unavailable'} />
         <Stat label="Not attended" value={missedToday.length} tone="muted" />
       </section>
 

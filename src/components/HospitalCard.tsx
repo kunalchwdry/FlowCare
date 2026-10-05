@@ -7,6 +7,7 @@ import { IconChevron, IconCompare, IconHeart, IconInfo, IconPin } from './Icons'
 import { formatDistance } from '@/lib/discovery/geo';
 import { label } from '@/lib/discovery/filters';
 import type { DiscoveryResult } from '@/lib/types';
+import { TrafficSummary } from './PatientTraffic';
 
 export interface EvidenceItem { kind: 'flowcare' | 'google' | 'geo'; text: string }
 export type ResultWithEvidence = DiscoveryResult & { evidence?: EvidenceItem[] };
@@ -87,6 +88,8 @@ export function HospitalCard({
             uri={result.external.data?.googleMapsUri}
           />
         </div>
+
+        <TrafficSummary traffic={result.traffic} />
 
         {!compact && (
           <div className="mt-3 flex flex-wrap gap-1">
