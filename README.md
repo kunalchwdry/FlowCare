@@ -362,6 +362,161 @@ at most 5 pending proposals per user; one user cannot confirm another's; and
 the result is always presented as a **request**, never a confirmed
 appointment, until the hospital accepts.
 
+**A broader emergency guard applies here than in search.** Show is this hospital's data" is a query, not a
+guess.
+
+Freshness is computed per field type against its own TTL:
+
+| Fact | TTL | Rationale |
+|---|---|---|
+| Phone, scheme listings | 90 days | Change often, high cost when wrong |
+| Charges, services, address, prep | 180 days | Moderately stable |
+| Accessibility, languages, arrival, routes | 365 days | Physical infrastructure |
+
+`fresh` → within TTL · `ageing` → 1–2× TTL · `stale` → beyond 2× ·
+`unverified` → never checked · `live` → fetched from Google this request.
+
+---
+
+## 6. Feature catalogue
+
+### 6.1 Discovery and search
+
+| Feature | What it does | The honest bit |
+|---|---|---|
+| **Multi-modal search** | Name, locality, specialty, service, or natural language | Ranking is deterministic and inspectable; no hidden personalisation |
+| **Nearby browse** | Distance from a located or manually-set point | Straight-line unless the Routes API is enabled — and it is labelled as such |
+| **Map + list toggle** | `/hospitals/map` | Falls back to a schematic non-Google map when no browser key is set |
+| **Smart filters** | Specialty, service, accessibility, scheme, emergency, language | A filter appears **only** if the underlying fact is verifiable and filterable |
+| **Autocomplete** | Session-tokened Places autocomplete | Session tokens are fresh UUIDv4 per session, as the billing terms require |
+| **Comparison** | Up to 4 hospitals side by side, `/hospitals/compare` | A table, never a ranking. There is no "best" column |
+| **Saved hospitals** | `/hospitals/saved`, RLS-isolated | Cross-user access is covered by a live test |
+| **Recently viewed** | With an explicit clear action | Stored locally, never used to re-rank silently |
+| **Availability status** | Available / Limited / None / **Unknown** | 14-day window from real slots. No sessions ⇒ `unknown`. **Never** derived from opening hours |
+
+### 6.2 Ratings and reviews
+
+Two rating systems that are **never** combined into one number:
+
+- **Google rating** — shown as Google's, attributed, fetched live, never stored.
+- **FlowCare rating** — only from authenticated patients with an eligible
+  completed visit, across five dimensions (overall, waiting, staff,
+  appointment, facility).
+
+The FlowCare aggregate (`fc-rating-v1`) is deliberately non-naive:
+
+```
+counted   = published AND verifiedVisit
+recency   = clamp(0.5 ^ (ageDays / 540), 0.35, 1)
+score     = (8 × 3.8 + Σ wᵢrᵢ) / (8 + Σ wᵢ)     # Bayesian prior, 8 pseudo-counts
+published = counted ≥ 5, else "Not enough FlowCare reviews yet"
+```
+
+The prior stops one five-star review from outranking a hospital with fifty.
+The recency weight stops a good year in 2021 from carrying 2026. The threshold
+stops a score from existing before it means anything. **Review sentiment is
+never converted into a medical-quality score** — the literature is explicit
+that patient-reported outcomes track experience, not clinical quality (S64).
+
+**Moderation:** report → hide/remove status → human decision → audit event.
+Duplicate, spam and abuse prevention run before publication. AI may attach a
+flag, a reason and a confidence — the `moderation_ai_cannot_finalise` CHECK
+makes an AI-finalised decision impossible at the database level.
+
+### 6.3 Understanding a hospital
+
+| Feature | Detail |
+|---|---|
+| **Service verification** | Each claimed service carries its own evidence and date. Unverified services are shown but are **not filterable** |
+| **Plain-language bridge** | 22 care needs mapped to departments, with Hindi and Marathi transliterations. Ambiguous input resolves to ≥2 departments rather than guessing |
+| **Scheme listings** | Values are `listed` or `unknown` only — there is deliberately **no** `not_listed`, because absence of evidence is not evidence of absence |
+| **Charges** | Per-component rows, never a single "cost" figure |
+| **Accessibility** | Per-component, sourced. Given that audits find 4% accessible toilets against near-universal ramp claims, a single "accessible ✓" would be a lie |
+| **Fact corrections** | Patients submit; a reviewer decides; the CHECK `correction_decision_requires_reviewer` makes self-publishing impossible. Accepted edits apply only to address fields, through explicit branches — no dynamic SQL |
+
+### 6.4 Booking and the appointment lifecycle
+
+Appointments run through a versioned state machine (`private.mutate_appointment`)
+with optimistic concurrency (`VERSION_CONFLICT`), an idempotency ledger, and
+per-hospital advisory locks. Every transition writes to `appointment_events`.
+
+| Feature | Detail |
+|---|---|
+| **Handoff receipt** | `isConfirmedAppointment` is a **separate boolean** from `status`, so a `requested` row can never render as a booking. A requested appointment reads *"Waiting for the hospital to confirm. Do not travel yet."* |
+| **Change policy** | States cancellability and the no-show grace period — and reports `noShowPolicyPublished: false` rather than defaulting to a number nobody promised |
+| **Change watcher** | Derived from `appointment_events` plus a per-user `seen_version` watermark that never moves backwards |
+| **Dependent profiles** | Book for a relative who has no account. **Not guardianship** — see below |
+| **Continuity bookmark** | "Same department as last time", bound to `departments.id` by foreign key, not to a remembered name |
+
+### 6.5 Preparing, travelling, arriving
+
+| Feature | Detail |
+|---|---|
+| **Preparation requirements** | Closed `prep_code` allowlist plus a clinical blocklist. FlowCare will tell you to bring your ID; it will never tell you to fast |
+| **Travel** | Mode-aware. Car and bus estimates are **never** substituted for one another — the research found an OR of 1.55 for the lowest-income × longest-bus group (S42) |
+| **Arrival pack** | Entrance, registration, OPD timing, what to bring |
+| **Wayfinding routes** | Schema exists; no facility has authored one yet, and the UI says exactly that |
+| **Support channels** | Phone/email/website per purpose, with provenance. **26 of 60 seeded hospitals have none** — and that renders as "not connected", not as a blank field |
+| **Carry list** | A what-to-bring checklist, importable from a facility's published prep requirements. **Stores no files** — there is no upload path and no storage bucket |
+| **Offline visit packet** | `public.visit_packet()` assembles appointment + receipt + arrival pack + support channels + results policy + carry list into one printable document. A missing section comes back `null`, and the print view renders that as "the hospital has not published this" |
+
+### 6.6 After the visit
+
+| Feature | Detail |
+|---|---|
+| **Visit records** | Patient-owned history with a generated `expires_on = visited_on + 24 months`, filtered in RLS **and** purged by a job. This table is the most sensitive in the system and is **not delegable under any scope** |
+| **Follow-up tasks** | Patient-owned, with kinds and due dates |
+| **Referral tracking** | Patient-reported loop closure: open → appointment made → completed/abandoned. `source` is pinned to `patient_reported` by CHECK so it can never masquerade as a clinical referral |
+| **Results delivery** | Split in two: a **facility fact** (how this department actually returns results, with provenance; absent ⇒ "not published") and a **patient preference** (what to ask for). FlowCare stores no result and promises no delivery |
+
+### 6.7 Bring your own AI key
+
+`/settings` lets a signed-in user store their own provider key (Gemini,
+OpenAI, Groq, NVIDIA, OpenRouter, Together, Mistral) and pick a model. The
+assistant then runs on their quota rather than the operator's.
+
+| Property | How |
+|---|---|
+| Encrypted at rest | AES-256-GCM. The master key is a server environment variable, never in the database, so a dump alone yields nothing usable |
+| Never shown again | Only the last four characters (`••••••••4f2a`) ever reach a browser |
+| Never logged, never prompted | Plaintext exists only as an `Authorization` header inside the provider adapter |
+| No operator access | There is no admin read path and no staff permission that grants one |
+| "Working" is earned | A key is `Not checked yet` until a **real** call to the provider succeeds. Shape alone never marks it valid |
+| Replacing resets trust | Saving a new key clears the previous validation result |
+| Refuses to run unsafely | With no `FLOWCARE_KEY_ENCRYPTION_SECRET`, FlowCare declines to store keys rather than encrypting under a predictable secret |
+
+### 6.8 The agentic booking workflow
+
+Say *"book my leg appointment"* and the assistant walks you to a booking —
+but it never books anything itself.
+
+```
+model ──► intent (Zod-validated, allowlisted fields only)
+           │
+server ────┴─► search ─► candidates ─► YOU pick ─► server builds the payload
+                                                     │
+you ────────────────────────── tap Confirm ──────────┤
+                                                     ▼
+server ──────────────────────────────────► book_appointment()
+```
+
+**The language model never writes to the database.** It produces a small
+structured intent and nothing else. It does not choose the hospital, the slot
+or the payload, and `confirm_agent_proposal()` takes a **proposal id, not a
+payload** — verified by a test that inspects the function signature.
+
+That shape is deliberate: if the model could supply the payload, then any text
+a patient pasted in — a hospital description, a review, a forwarded message —
+would become a potential instruction to book something else. Prompt injection
+would be a booking primitive. As built, the worst a fully compromised model
+can do is suggest a bad search.
+
+Other guarantees: proposals expire (default 10 minutes) and expiry is
+recorded; confirming twice books once via a deterministic idempotency key;
+at most 5 pending proposals per user; one user cannot confirm another's; and
+the result is always presented as a **request**, never a confirmed
+appointment, until the hospital accepts.
+
 **A broader emergency guard applies here than in search.** Showing a list of
 hospitals is low-stakes; booking a routine outpatient slot implicitly says
 "this is the right path, now wait", which is dangerous if someone is
