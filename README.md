@@ -4,7 +4,7 @@
 
 FlowCare started as an outpatient appointment app. It is now an end-to-end
 journey: **Discover → Search → Filter → Compare → Understand → Choose → Book →
-Prepare → Travel → Arrive → Track → Follow up.**
+Prepare → Travel → Arrive → Track → Follow upp.**
 
 Its distinguishing property is not the feature list. It is that **every claim
 on the screen can be traced to a source, a date and a verifier** — and where
