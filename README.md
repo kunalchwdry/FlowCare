@@ -37,7 +37,7 @@ plausible default.
 
 Finding the right hospital in an Indian city is not a search problem. It is a
 **trust problem**. The research behind this project (37 graded sources in
-`docs/research/sources.md`, plus a second and third review pass) found the same
+`docs/research/sources.md`, plus a second and third is the review pass) found the same
 failure repeating at every step:
 
 | Stage | What actually goes wrong | Evidence |
