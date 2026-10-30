@@ -2,7 +2,7 @@
 
 **A hospital discovery and outpatient appointment platform for Indian cities, built so that a patient can tell the difference between a fact and a guess.**
 
-FlowCare started as an outpatient appointment app. It is now an end-to-end
+FlowCare started as a outpatient appointment app. It is now an end-to-end
 journey: **Discover → Search → Filter → Compare → Understand → Choose → Book →
 Prepare → Travel → Arrive → Track → Follow upp.**
 
